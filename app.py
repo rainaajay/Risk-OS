@@ -8,7 +8,103 @@ import math
 import streamlit as st
 import plotly.graph_objects as go
 import networkx as nx
+import pandas as pd
 from entities import ENTITIES, NETWORKS, SIGNALS, compute_scores, signals_for_entity
+
+# ─── ENTITY → TICKER MAPPING (for RV model lookup) ───────────────────────────
+# Maps CP entity IDs to their yfinance tickers where available
+CP_TICKER_MAP: dict[str, str] = {
+    "CP001": "VWAGY",   # Volkswagen ADR
+    "CP003": "MBGYY",   # Mercedes-Benz ADR
+    "CP005": "AML.L",   # Aston Martin
+    "CP007": "CTTAY",   # Continental ADR
+    "CP009": "",        # Northvolt (private)
+    "CP013": "WIZZ.L",  # Wizz Air
+    "CP023": "",        # Thames Water (private)
+    "CP028": "",        # Signa (insolvent)
+    "CP033": "ATOSY",   # Atos ADR
+    # Ext A
+    "CP034": "STLAM",   # Stellantis
+    "CP035": "RNLSY",   # Renault ADR
+    "CP036": "BMWYY",   # BMW ADR
+    "CP039": "AFLYY",   # Air France-KLM ADR
+    "CP040": "DLAKY",   # Lufthansa ADR
+    "CP042": "RYAAY",   # Ryanair ADR
+    "CP043": "BP",      # BP
+    "CP044": "TTE",     # TotalEnergies
+    "CP045": "E",       # ENI
+    "CP046": "EQNR",    # Equinor
+    "CP047": "DNNGY",   # Ørsted ADR
+    "CP048": "VWSYF",   # Vestas
+    "CP049": "RWEOY",   # RWE ADR
+    "CP050": "ENLAY",   # Enel ADR
+    "CP051": "EONGY",   # E.ON ADR
+    "CP052": "NGG",     # National Grid
+    "CP053": "EADSY",   # Airbus ADR
+    "CP054": "RYCEY",   # Rolls-Royce ADR
+    "CP055": "THLEF",   # Thales
+    "CP056": "FINMY",   # Leonardo ADR
+    "CP057": "BAESY",   # BAE Systems ADR
+    "CP058": "SAFRY",   # Safran ADR
+    "CP059": "SHEL",    # Shell
+    # Ext B
+    "CP064": "VOD",     # Vodafone
+    "CP065": "DTEGY",   # Deutsche Telekom ADR
+    "CP066": "ORAN",    # Orange ADR
+    "CP069": "SAP",     # SAP
+    "CP070": "ERIC",    # Ericsson
+    "CP071": "NOK",     # Nokia
+    "CP072": "CGEMY",   # Capgemini ADR
+    "CP073": "WLN.PA",  # Worldline
+    "CP074": "AMADY",   # Amadeus ADR
+    "CP075": "BAYRY",   # Bayer ADR
+    "CP077": "SNY",     # Sanofi ADR
+    "CP078": "AZN",     # AstraZeneca
+    "CP079": "RHHBY",   # Roche ADR
+    "CP080": "NVS",     # Novartis
+    "CP083": "IDEXY",   # Inditex ADR
+    "CP084": "NSRGY",   # Nestlé ADR
+    "CP085": "UL",      # Unilever
+    "CP089": "CRRFY",   # Carrefour ADR
+    "CP092": "ABEV",    # AB InBev ADR (ABEV is Ambev, BUD is AB InBev)
+    "CP092": "BUD",     # AB InBev
+    "CP093": "PRDSF",   # Pernod Ricard
+    "CP095": "LVMUY",   # LVMH ADR
+    # Ext C
+    "CP094": "BASFY",   # BASF ADR
+    "CP098": "TKAMY",   # ThyssenKrupp ADR
+    "CP099": "SMNEY",   # Siemens Energy ADR
+    "CP101": "SBGSY",   # Schneider Electric ADR
+    "CP102": "ABB",     # ABB
+    "CP103": "GLNCY",   # Glencore ADR
+    "CP104": "MT",      # ArcelorMittal
+    "CP105": "AAUKF",   # Anglo American
+    "CP106": "RIO",     # Rio Tinto
+    "CP109": "FER.MC",  # Ferrovial
+    "CP110": "VCISY",   # VINCI ADR
+    "CP112": "CLNXF",   # Cellnex
+    "CP113": "AMKBY",   # Maersk ADR
+    "CP117": "HDELY",   # HeidelbergMaterials ADR
+    "CP118": "CODGF",   # Saint-Gobain
+}
+
+# ─── RV MODEL (lazy-loaded, cached 24 h) ──────────────────────────────────────
+@st.cache_data(ttl=86400, show_spinner="Fetching market data & training model…")
+def _load_rv_data():
+    """Fetch real data + train/load XGBoost model. Cached 24 h."""
+    try:
+        from data_fetcher import get_data, enrich_with_ecosystem
+        from rv_model    import load_or_train, get_dislocation_summary
+        from ecosystems  import TRAINING_TICKERS
+        raw  = get_data(TRAINING_TICKERS)
+        enr  = enrich_with_ecosystem(raw)
+        preds, model, imp, scaler = load_or_train(enr)
+        summary = get_dislocation_summary(preds)
+        return summary
+    except Exception as exc:
+        return None   # graceful degradation if deps not installed yet
+
+RV_DATA: pd.DataFrame | None = _load_rv_data()
 
 # ─── THEME ────────────────────────────────────────────────────────────────────
 BG      = "#0f172a"
@@ -1561,6 +1657,11 @@ def page_entity(cp_id: str):
                        help="Model confidence based on signal coverage")
     _score_drilldown(cp_id, sc)
 
+    # Model-implied vs actual (if ticker known)
+    ticker = CP_TICKER_MAP.get(cp_id, "")
+    if ticker:
+        _rv_entity_panel(ticker)
+
     st.divider()
 
     # ── Build node map before columns (shared by both columns) ─────────────────
@@ -1917,6 +2018,201 @@ def page_agents():
                         len(cps_in_country), n_sigs, f"country_{country}", "ACTIVE", alert)
 
 
+# ─── PAGE: RELATIVE VALUE ─────────────────────────────────────────────────────
+
+def _rv_unavailable():
+    st.info("Market data is loading — this runs once on first deploy and takes ~2 minutes. Refresh to check.")
+
+def _disloc_color(v: float) -> str:
+    if v > 20:  return "#ef4444"   # rich (expensive)
+    if v > 5:   return "#f59e0b"
+    if v < -20: return "#22c55e"   # cheap
+    if v < -5:  return "#60a5fa"
+    return "#94a3b8"
+
+def _disloc_label(v: float) -> str:
+    if v > 20:  return "RICH"
+    if v > 5:   return "Slightly Rich"
+    if v < -20: return "CHEAP"
+    if v < -5:  return "Slightly Cheap"
+    return "FAIR"
+
+def page_relative_value():
+    if RV_DATA is None:
+        _rv_unavailable(); return
+
+    df = RV_DATA.copy()
+
+    st.markdown(
+        f'<div style="font-size:22px;font-weight:900;color:{TEXT};margin-bottom:4px">'
+        f'📐 Relative Value — Model vs Market</div>'
+        f'<div style="color:{MUTED};font-size:12px;margin-bottom:20px">'
+        f'XGBoost model trained on {len(df)} firms · predicts fair-value PE / EV/EBITDA / P/B / Beta · '
+        f'dislocation = (actual − model-implied) as % deviation · refreshed every 24 h</div>',
+        unsafe_allow_html=True)
+
+    # ── Ecosystem dislocation bar chart ──────────────────────────────────────
+    st.markdown(f'<div style="font-size:15px;font-weight:700;color:{TEXT};margin-bottom:8px">'
+                f'Ecosystem Relative Value</div>', unsafe_allow_html=True)
+    eco_avg = (df.groupby("ecosystem")["composite_dislocation"]
+                 .mean().sort_values(ascending=False).reset_index())
+    colors  = [_disloc_color(v) for v in eco_avg["composite_dislocation"]]
+    fig_eco = go.Figure(go.Bar(
+        x=eco_avg["ecosystem"], y=eco_avg["composite_dislocation"],
+        marker_color=colors, marker_line_color=BG, marker_line_width=1,
+        text=[f"{v:+.1f}" for v in eco_avg["composite_dislocation"]],
+        textposition="outside", textfont=dict(color=TEXT, size=10)))
+    fig_eco.add_hline(y=0, line_color=BORDER, line_width=1)
+    fig_eco.update_layout(
+        height=280, margin=dict(l=0,r=0,t=10,b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(color=MUTED, gridcolor=BORDER, tickangle=-20, tickfont=dict(size=10)),
+        yaxis=dict(color=MUTED, gridcolor=BORDER, title="Avg dislocation (%)"),
+        font=dict(color=MUTED, size=10), showlegend=False)
+    st.plotly_chart(fig_eco, use_container_width=True)
+    st.caption("Positive = ecosystem trading richer than fundamentals justify. Negative = potential undervaluation.")
+
+    st.divider()
+
+    # ── Firm screener ─────────────────────────────────────────────────────────
+    sc1, sc2, sc3 = st.columns([2, 2, 2])
+    eco_opts = ["All ecosystems"] + sorted(df["ecosystem"].dropna().unique().tolist())
+    with sc1:
+        sel_eco = st.selectbox("Ecosystem", eco_opts, key="rv_eco")
+    with sc2:
+        signal_filter = st.selectbox("Signal", ["All", "CHEAP (buy candidates)", "RICH (sell candidates)"], key="rv_sig")
+    with sc3:
+        sort_col = st.selectbox("Sort by", ["Composite", "PE dislocation", "EV/EBITDA dislocation"], key="rv_sort")
+
+    filtered = df.copy()
+    if sel_eco != "All ecosystems":
+        filtered = filtered[filtered["ecosystem"] == sel_eco]
+    if signal_filter == "CHEAP (buy candidates)":
+        filtered = filtered[filtered["composite_dislocation"] < -5]
+    elif signal_filter == "RICH (sell candidates)":
+        filtered = filtered[filtered["composite_dislocation"] > 5]
+
+    sort_map = {"Composite": "composite_dislocation",
+                "PE dislocation": "disloc_forwardPE",
+                "EV/EBITDA dislocation": "disloc_enterpriseToEbitda"}
+    sort_c = sort_map[sort_col]
+    if sort_c in filtered.columns:
+        filtered = filtered.sort_values(sort_c, ascending=False, na_position="last")
+
+    st.markdown(f'<div style="color:{MUTED};font-size:12px;margin-bottom:10px">'
+                f'Showing {len(filtered)} firms</div>', unsafe_allow_html=True)
+
+    # Table
+    rows_html = ""
+    for _, row in filtered.iterrows():
+        v    = row.get("composite_dislocation", float("nan"))
+        dc   = _disloc_color(v) if not pd.isna(v) else MUTED
+        dlbl = _disloc_label(v) if not pd.isna(v) else "—"
+        fpe  = row.get("forwardPE", float("nan"))
+        pfe  = row.get("pred_forwardPE", float("nan"))
+        eve  = row.get("enterpriseToEbitda", float("nan"))
+        peve = row.get("pred_enterpriseToEbitda", float("nan"))
+        eco  = row.get("ecosystem", "—")
+        tkr  = row.get("ticker", "—")
+
+        def _fmt(x): return f"{x:.1f}" if not pd.isna(x) else "—"
+        def _fmtp(x): return f"{x:+.1f}%" if not pd.isna(x) else "—"
+
+        rows_html += (
+            f'<tr style="border-bottom:1px solid {BORDER}">'
+            f'<td style="padding:7px 6px;font-weight:700;color:{TEXT}">{tkr}</td>'
+            f'<td style="padding:7px 6px;color:{MUTED};font-size:11px">{eco}</td>'
+            f'<td style="padding:7px 6px;text-align:center">'
+            f'<span style="background:{dc}22;color:{dc};padding:2px 8px;border-radius:4px;'
+            f'font-size:10px;font-weight:700">{dlbl}</span></td>'
+            f'<td style="padding:7px 6px;text-align:right;color:{dc};font-weight:700">'
+            f'{_fmtp(v)}</td>'
+            f'<td style="padding:7px 6px;text-align:right;color:{TEXT}">{_fmt(fpe)}</td>'
+            f'<td style="padding:7px 6px;text-align:right;color:{MUTED}">{_fmt(pfe)}</td>'
+            f'<td style="padding:7px 6px;text-align:right;color:{TEXT}">{_fmt(eve)}</td>'
+            f'<td style="padding:7px 6px;text-align:right;color:{MUTED}">{_fmt(peve)}</td>'
+            f'</tr>')
+
+    st.markdown(
+        f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+        f'<thead><tr style="border-bottom:2px solid {BORDER}">'
+        f'<th style="text-align:left;padding:6px;color:{MUTED}">Ticker</th>'
+        f'<th style="text-align:left;padding:6px;color:{MUTED}">Ecosystem</th>'
+        f'<th style="text-align:center;padding:6px;color:{MUTED}">Signal</th>'
+        f'<th style="text-align:right;padding:6px;color:{MUTED}">Dislocation</th>'
+        f'<th style="text-align:right;padding:6px;color:{MUTED}">Actual PE</th>'
+        f'<th style="text-align:right;padding:6px;color:{MUTED}">Model PE</th>'
+        f'<th style="text-align:right;padding:6px;color:{MUTED}">Actual EV/E</th>'
+        f'<th style="text-align:right;padding:6px;color:{MUTED}">Model EV/E</th>'
+        f'</tr></thead><tbody>{rows_html}</tbody></table>',
+        unsafe_allow_html=True)
+
+    st.divider()
+    st.caption("Model: XGBoost multi-output regressor trained on fundamentals + ecosystem peer context. "
+               "Dislocation is the % gap between actual and model-implied multiples, normalised to a z-score. "
+               "This is not investment advice.")
+
+
+def _rv_entity_panel(ticker: str):
+    """Show model-implied vs actual for a single ticker on the entity page."""
+    if RV_DATA is None:
+        return
+    df  = RV_DATA
+    row = df[df["ticker"].str.upper() == ticker.upper()]
+    if row.empty:
+        return
+
+    r   = row.iloc[0]
+    v   = r.get("composite_dislocation", float("nan"))
+    if pd.isna(v):
+        return
+
+    dc   = _disloc_color(v)
+    dlbl = _disloc_label(v)
+
+    def _fmt(x): return f"{x:.1f}x" if (x and not pd.isna(x)) else "—"
+    def _row(label, actual, model, unit="x"):
+        if pd.isna(actual) and pd.isna(model): return ""
+        gap = actual - model if (not pd.isna(actual) and not pd.isna(model)) else float("nan")
+        gc  = _disloc_color(gap / abs(model) * 100 if model and not pd.isna(model) else 0)
+        return (f'<tr style="border-bottom:1px solid {BORDER}">'
+                f'<td style="padding:5px 6px;color:{MUTED};font-size:12px">{label}</td>'
+                f'<td style="padding:5px 6px;text-align:right;font-weight:700;color:{TEXT};font-size:12px">'
+                f'{"—" if pd.isna(actual) else f"{actual:.1f}{unit}"}</td>'
+                f'<td style="padding:5px 6px;text-align:right;color:{MUTED};font-size:12px">'
+                f'{"—" if pd.isna(model) else f"{model:.1f}{unit}"}</td>'
+                f'<td style="padding:5px 6px;text-align:right;font-size:12px;font-weight:700;color:{gc}">'
+                f'{"—" if pd.isna(gap) else f"{gap:+.1f}{unit}"}</td>'
+                f'</tr>')
+
+    rows = (
+        _row("Forward P/E",    r.get("forwardPE"),           r.get("pred_forwardPE"),           "x") +
+        _row("P / Book",       r.get("priceToBook"),         r.get("pred_priceToBook"),         "x") +
+        _row("EV / EBITDA",    r.get("enterpriseToEbitda"),  r.get("pred_enterpriseToEbitda"),  "x") +
+        _row("Beta",           r.get("beta"),                r.get("pred_beta"),                "")
+    )
+    if not rows:
+        return
+
+    st.markdown(
+        f'<div style="background:{CARD_BG};border:1px solid {BORDER};'
+        f'border-left:4px solid {dc};border-radius:8px;padding:14px 16px;margin-bottom:14px">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+        f'<div style="font-size:14px;font-weight:700;color:{TEXT}">📐 Model-Implied vs Market</div>'
+        f'<div style="background:{dc}22;color:{dc};font-size:11px;font-weight:700;'
+        f'padding:3px 10px;border-radius:6px">{dlbl} · {v:+.1f}%</div></div>'
+        f'<table style="width:100%;border-collapse:collapse">'
+        f'<thead><tr style="border-bottom:1px solid {BORDER}">'
+        f'<th style="text-align:left;padding:4px 6px;color:{MUTED};font-size:10px;letter-spacing:1px">METRIC</th>'
+        f'<th style="text-align:right;padding:4px 6px;color:{MUTED};font-size:10px">ACTUAL</th>'
+        f'<th style="text-align:right;padding:4px 6px;color:{MUTED};font-size:10px">MODEL</th>'
+        f'<th style="text-align:right;padding:4px 6px;color:{MUTED};font-size:10px">GAP</th>'
+        f'</tr></thead><tbody>{rows}</tbody></table>'
+        f'<div style="font-size:10px;color:{MUTED};margin-top:8px">'
+        f'XGBoost · trained on 120 firms · {r.get("ecosystem","—")} peer group · refreshed daily</div>'
+        f'</div>', unsafe_allow_html=True)
+
+
 # ─── SIDEBAR (hidden — nav is via top bar) ───────────────────────────────────
 
 def sidebar():
@@ -1940,6 +2236,7 @@ def sidebar():
         NAV = [
             ("home",      "📊", "Home"),
             ("portfolio", "🏦", "Counterparty"),
+            ("rv",        "📐", "Relative Value"),
             ("sources",   "📡", "Signal Feed"),
             ("agents",    "🤖", "AI Agents"),
         ]
@@ -2024,6 +2321,7 @@ def _top_nav():
     if page == "portfolio":            crumb_parts.append("Counterparty")
     elif page == "network":            crumb_parts.append("Full Network")
     elif page == "sources":            crumb_parts.append("Signal Sources")
+    elif page == "rv":                 crumb_parts.append("Relative Value")
     elif page == "agents":             crumb_parts.append("AI Agents")
     elif page == "entity" and cp_name: crumb_parts += ["Counterparty", cp_name]
     elif page == "network":            crumb_parts.append("Counterparty")
@@ -2042,11 +2340,12 @@ def _top_nav():
     NAV = [
         ("🏠 Home",        "home",     "tnb_home"),
         ("🏦 Counterparty","portfolio","tnb_port"),
+        ("📐 Rel. Value",  "rv",       "tnb_rv"),
         ("📡 Sources",     "sources",  "tnb_src"),
         ("🤖 Agents",      "agents",   "tnb_agents"),
     ]
-    btn_cols = st.columns([1, 1, 1, 1, 2])
-    for col, (label, target, key) in zip(btn_cols[:4], NAV):
+    btn_cols = st.columns([1, 1, 1, 1, 1, 2])
+    for col, (label, target, key) in zip(btn_cols[:5], NAV):
         active = (page == target) or (page == "entity" and target == "portfolio")
         with col:
             if active:
@@ -2060,7 +2359,7 @@ def _top_nav():
                     _navigate_to(target)
 
     # Sector + Country quick-filters (right side of nav)
-    with btn_cols[4]:
+    with btn_cols[5]:
         qf1, qf2 = st.columns(2)
         all_sectors = ["All sectors"] + sorted(set(e["sector"] for e in ENTITIES.values()))
         seen_c2: dict = {}
@@ -2124,6 +2423,7 @@ def main():
     if page == "home":               page_home()
     elif page == "portfolio":        page_portfolio()
     elif page == "network":          page_full_network()
+    elif page == "rv":               page_relative_value()
     elif page == "sources":          page_sources()
     elif page == "agents":           page_agents()
     elif page == "entity" and cp and cp in ENTITIES: page_entity(cp)
