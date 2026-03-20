@@ -1309,9 +1309,9 @@ def page_home():
         (cs2, "🏭", "Supplier Risk",
          "Tier-1 and Tier-2 supply chain mapping, single-source dependencies, "
          "factory disruption scoring and logistics stress monitoring."),
-        (cs3, "👤", "Key-Person Risk",
-         "Risk profiles for politicians, central bankers, and executives whose "
-         "actions can materially move credit and equity markets."),
+        (cs3, "👤", "Other Entities & Actors",
+         "Risk profiles for sovereigns, central banks, politicians, and other actors "
+         "whose actions can materially move credit and equity markets."),
     ]:
         col.markdown(f"""
         <div style="background:{CARD_BG};border:1px solid {BORDER};border-radius:10px;
