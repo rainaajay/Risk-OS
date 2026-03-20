@@ -1204,7 +1204,7 @@ def page_home():
                     "Signals 1–2 hops away, scored and stress-tested.",
             "status": "LIVE",
             "stats": [
-                ("Counterparties", "10"),
+                ("Counterparties", str(len(ENTITIES))),
                 ("Total EAD", f"£{total_ead:.0f}M"),
                 ("Total ECL", f"£{total_ecl:.1f}M"),
                 ("🔴 RED", str(n_red)),
@@ -1440,7 +1440,7 @@ def page_portfolio():
 
 def page_full_network():
     st.markdown("## Full Portfolio Network")
-    st.caption("All 10 counterparties + complete ecosystems. CP size = EAD. CP colour = RAG.")
+    st.caption(f"All {len(ENTITIES)} counterparties + complete ecosystems. CP size = EAD. CP colour = RAG.")
     all_types = list(NODE_COL.keys())
     sel_types = st.multiselect("Node types",options=all_types,default=all_types,key="full_net_types")
     G = _build_full_graph()
