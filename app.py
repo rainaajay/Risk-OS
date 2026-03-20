@@ -1144,22 +1144,130 @@ def page_sources():
 # ─── PAGE: HOME (landing) ─────────────────────────────────────────────────────
 
 def page_home():
+    # ── Logo + tagline ────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="text-align:center;padding:48px 0 36px">
+      <div style="font-size:48px;font-weight:900;letter-spacing:-2px;color:{TEXT}">
+        Risk <span style="color:#3b82f6">OS</span>
+      </div>
+      <div style="color:{MUTED};font-size:16px;margin-top:10px;max-width:520px;
+                  margin-left:auto;margin-right:auto;line-height:1.6">
+        AI-powered risk intelligence — monitor, score, and stress-test
+        any entity and its full network in real time.
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ── Module tiles ──────────────────────────────────────────────────────────
     total_ead = sum(e["ead_m"] for e in ENTITIES.values())
     total_ecl = sum(SCORES[cp]["ecl_m"] for cp in ENTITIES)
-    n_red    = sum(1 for cp in ENTITIES if SCORES[cp]["rag"]=="RED")
-    n_amber  = sum(1 for cp in ENTITIES if SCORES[cp]["rag"]=="AMBER")
-    n_green  = sum(1 for cp in ENTITIES if SCORES[cp]["rag"]=="GREEN")
-    all_sigs = len(SIGNALS)
+    n_red     = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "RED")
+    n_amber   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "AMBER")
+    all_sigs  = len(SIGNALS)
 
-    # ── Header ──────────────────────────────────────────────────────────────────
+    MODULES = [
+        {
+            "icon": "🏦", "title": "Counterparty Risk",
+            "desc": "Deep network intelligence on borrowers, bond issuers, and trading "
+                    "counterparties. AI agents trawl news, filings, CDS markets, and "
+                    "alt-data — scoring every entity and propagating signals 1–2 hops "
+                    "across the network for early warning.",
+            "status": "LIVE", "color": "#3b82f6",
+            "stats": [
+                ("Counterparties", str(len(ENTITIES))),
+                ("Total EAD",      f"£{total_ead/1000:.1f}bn"),
+                ("ECL",            f"£{total_ecl:.0f}M"),
+                ("🔴",             str(n_red)),
+                ("🟡",             str(n_amber)),
+                ("Signals",        str(all_sigs)),
+            ],
+            "btn": "Open Module →", "action": "portfolio",
+        },
+        {
+            "icon": "🌍", "title": "Country Risk",
+            "desc": "Sovereign and macro risk monitors covering political stability, "
+                    "regulatory environment, FX stress, and cross-border contagion "
+                    "paths for 50+ jurisdictions.",
+            "status": "COMING SOON", "color": BORDER,
+            "stats": [], "btn": "Coming Soon", "action": None,
+        },
+        {
+            "icon": "🏭", "title": "Supplier Risk",
+            "desc": "Tier-1 and Tier-2 supply chain mapping, single-source dependencies, "
+                    "factory disruption scoring, logistics stress, and commodity "
+                    "exposure monitoring.",
+            "status": "COMING SOON", "color": BORDER,
+            "stats": [], "btn": "Coming Soon", "action": None,
+        },
+        {
+            "icon": "👤", "title": "Other Entities & Actors",
+            "desc": "Risk profiles for central banks, regulators, politicians, and "
+                    "other actors whose decisions can materially move credit and "
+                    "equity markets.",
+            "status": "COMING SOON", "color": BORDER,
+            "stats": [], "btn": "Coming Soon", "action": None,
+        },
+    ]
+
+    c1, c2 = st.columns(2, gap="large")
+    cols_cycle = [c1, c2, c1, c2]
+    for col, m in zip(cols_cycle, MODULES):
+        live       = m["status"] == "LIVE"
+        status_col = "#22c55e" if live else MUTED
+        status_bg  = "#22c55e18" if live else f"{BORDER}44"
+        opacity    = "1" if live else "0.5"
+        stats_html = "".join([
+            f'<span style="background:{BG};border:1px solid {BORDER};border-radius:5px;'
+            f'padding:3px 9px;font-size:11px;margin-right:6px">'
+            f'<span style="color:{MUTED}">{s[0]}</span> '
+            f'<span style="color:{TEXT};font-weight:700">{s[1]}</span></span>'
+            for s in m["stats"]
+        ])
+        with col:
+            st.markdown(f"""
+            <div style="background:{CARD_BG};border:1px solid {m['color']};border-radius:12px;
+                        padding:26px;margin-bottom:20px;opacity:{opacity};min-height:240px">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <span style="font-size:34px">{m['icon']}</span>
+                <div>
+                  <div style="font-size:20px;font-weight:800;color:{TEXT}">{m['title']}</div>
+                  <div style="font-size:10px;font-weight:700;color:{status_col};
+                              background:{status_bg};padding:2px 9px;border-radius:10px;
+                              display:inline-block;margin-top:4px;letter-spacing:1px">
+                    {m['status']}</div>
+                </div>
+              </div>
+              <div style="color:{MUTED};font-size:13px;line-height:1.7;margin-bottom:14px">
+                {m['desc']}
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">{stats_html}</div>
+            </div>""", unsafe_allow_html=True)
+            if live:
+                if st.button(m["btn"], key=f"mod_{m['title']}", type="primary",
+                             use_container_width=True):
+                    _navigate_to(m["action"])
+            else:
+                st.button(m["btn"], key=f"mod_{m['title']}", disabled=True,
+                          use_container_width=True)
+
+
+# ─── PAGE: PORTFOLIO ──────────────────────────────────────────────────────────
+
+def page_portfolio():
+    total_ead = sum(e["ead_m"] for e in ENTITIES.values())
+    total_ecl = sum(SCORES[cp]["ecl_m"] for cp in ENTITIES)
+    n_red     = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "RED")
+    n_amber   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "AMBER")
+    n_green   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "GREEN")
+    all_sigs  = len(SIGNALS)
+
+    # ── Executive dashboard header ────────────────────────────────────────────
     st.markdown(
-        f'<div style="font-size:26px;font-weight:900;color:{TEXT};margin-bottom:4px">'
-        f'📊 Executive Early Warning Dashboard</div>'
-        f'<div style="color:{MUTED};font-size:12px;margin-bottom:20px">'
-        f'Risk OS · {len(ENTITIES)} entities monitored · {all_sigs} live signals</div>',
+        f'<div style="font-size:22px;font-weight:900;color:{TEXT};margin-bottom:4px">'
+        f'🏦 Counterparty Risk — Early Warning Dashboard</div>'
+        f'<div style="color:{MUTED};font-size:12px;margin-bottom:16px">'
+        f'{len(ENTITIES)} entities monitored · {all_sigs} live signals</div>',
         unsafe_allow_html=True)
 
-    # ── Top stat boxes ───────────────────────────────────────────────────────────
     for col, val, label, col_c in zip(
         st.columns(5),
         [n_red, n_amber, n_green, f"£{total_ead/1000:.1f}bn", f"£{total_ecl:.0f}M"],
@@ -1168,19 +1276,16 @@ def page_home():
     ):
         col.markdown(
             f'<div style="background:{CARD_BG};border:1px solid {BORDER};border-radius:10px;'
-            f'padding:18px 12px;text-align:center;margin-bottom:16px">'
-            f'<div style="font-size:34px;font-weight:900;color:{col_c};line-height:1">{val}</div>'
-            f'<div style="font-size:10px;letter-spacing:2px;color:{MUTED};margin-top:6px">{label}</div>'
+            f'padding:14px 10px;text-align:center;margin-bottom:12px">'
+            f'<div style="font-size:28px;font-weight:900;color:{col_c};line-height:1">{val}</div>'
+            f'<div style="font-size:10px;letter-spacing:2px;color:{MUTED};margin-top:5px">{label}</div>'
             f'</div>', unsafe_allow_html=True)
 
-    # ── Main content: table left, charts right ────────────────────────────────
     tbl_col, chart_col = st.columns([3, 2], gap="large")
-
     with tbl_col:
-        st.markdown(
-            f'<div style="font-size:16px;font-weight:700;color:{TEXT};margin-bottom:10px">'
-            f'🚨 Top Risk Entities</div>', unsafe_allow_html=True)
-        top_ids = sorted(ENTITIES.keys(), key=lambda x: -SCORES[x]["composite"])[:18]
+        st.markdown(f'<div style="font-size:14px;font-weight:700;color:{TEXT};margin-bottom:8px">'
+                    f'🚨 Top Risk Entities</div>', unsafe_allow_html=True)
+        top_ids   = sorted(ENTITIES.keys(), key=lambda x: -SCORES[x]["composite"])[:15]
         rag_label = {"RED": "CRITICAL", "AMBER": "HIGH", "GREEN": "NORMAL"}
         rows_html = ""
         for eid in top_ids:
@@ -1188,18 +1293,15 @@ def page_home():
             rc  = RAG_COL.get(sc["rag"], MUTED)
             rows_html += (
                 f'<tr style="border-bottom:1px solid {BORDER}">'
-                f'<td style="padding:7px 6px;color:{TEXT};font-weight:600;white-space:nowrap">'
+                f'<td style="padding:6px;color:{TEXT};font-weight:600;white-space:nowrap">'
                 f'{ent["flag"]} {ent["short"]}</td>'
-                f'<td style="padding:7px 6px;color:{MUTED};font-size:11px">{ent["sector"]}</td>'
-                f'<td style="padding:7px 6px;text-align:right;color:{rc};font-weight:700">'
-                f'{sc["composite"]:.0f}</td>'
-                f'<td style="padding:7px 6px;text-align:center">'
-                f'<span style="background:{rc}22;color:{rc};padding:2px 7px;border-radius:4px;'
+                f'<td style="padding:6px;color:{MUTED};font-size:11px">{ent["sector"]}</td>'
+                f'<td style="padding:6px;text-align:right;color:{rc};font-weight:700">{sc["composite"]:.0f}</td>'
+                f'<td style="padding:6px;text-align:center">'
+                f'<span style="background:{rc}22;color:{rc};padding:2px 6px;border-radius:4px;'
                 f'font-size:10px;font-weight:700">{rag_label.get(sc["rag"],"—")}</span></td>'
-                f'<td style="padding:7px 6px;text-align:right;color:{TEXT}">{ent["ead_m"]:.0f}</td>'
-                f'<td style="padding:7px 6px;text-align:right;color:{rc}">{sc["ecl_m"]:.1f}</td>'
-                f'</tr>'
-            )
+                f'<td style="padding:6px;text-align:right;color:{TEXT}">{ent["ead_m"]:.0f}</td>'
+                f'</tr>')
         st.markdown(
             f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
             f'<thead><tr style="border-bottom:2px solid {BORDER}">'
@@ -1208,167 +1310,46 @@ def page_home():
             f'<th style="text-align:right;padding:6px;color:{MUTED}">Score</th>'
             f'<th style="text-align:center;padding:6px;color:{MUTED}">RAG</th>'
             f'<th style="text-align:right;padding:6px;color:{MUTED}">EAD £M</th>'
-            f'<th style="text-align:right;padding:6px;color:{MUTED}">ECL £M</th>'
             f'</tr></thead><tbody>{rows_html}</tbody></table>',
             unsafe_allow_html=True)
-
     with chart_col:
-        # Score distribution histogram
-        st.markdown(
-            f'<div style="font-size:14px;font-weight:700;color:{TEXT};margin-bottom:6px">'
-            f'Score Distribution</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:4px">'
+                    f'Score Distribution</div>', unsafe_allow_html=True)
         scores_list = [SCORES[cp]["composite"] for cp in ENTITIES]
-        fig_h = go.Figure(go.Histogram(
-            x=scores_list, nbinsx=10,
+        fig_h = go.Figure(go.Histogram(x=scores_list, nbinsx=10,
             marker_color="#3b82f6", marker_line_color=BG, marker_line_width=1))
         fig_h.add_vline(x=70, line_color="#ef4444", line_dash="dash", line_width=1)
         fig_h.add_vline(x=30, line_color="#f59e0b", line_dash="dash", line_width=1)
-        fig_h.update_layout(
-            height=200, margin=dict(l=0, r=0, t=4, b=0),
+        fig_h.update_layout(height=180, margin=dict(l=0,r=0,t=4,b=0),
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(title="Composite Risk Score", color=MUTED, gridcolor=BORDER, tickfont=dict(size=10)),
-            yaxis=dict(title="# Entities", color=MUTED, gridcolor=BORDER, tickfont=dict(size=10)),
+            xaxis=dict(color=MUTED, gridcolor=BORDER, tickfont=dict(size=9)),
+            yaxis=dict(color=MUTED, gridcolor=BORDER, tickfont=dict(size=9)),
             font=dict(color=MUTED, size=10), showlegend=False)
         st.plotly_chart(fig_h, use_container_width=True)
 
-        # Sector risk concentration
-        st.markdown(
-            f'<div style="font-size:14px;font-weight:700;color:{TEXT};margin-bottom:6px">'
-            f'Sector Risk Concentration</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:4px">'
+                    f'Sector Risk Concentration</div>', unsafe_allow_html=True)
         sec_data: dict = {}
         for cp in ENTITIES:
-            s   = ENTITIES[cp]["sector"]
-            rag = SCORES[cp]["rag"]
-            sec_data.setdefault(s, {"RED": 0, "AMBER": 0, "GREEN": 0})
+            s = ENTITIES[cp]["sector"]; rag = SCORES[cp]["rag"]
+            sec_data.setdefault(s, {"RED":0,"AMBER":0,"GREEN":0})
             sec_data[s][rag] += 1
-        secs = sorted(sec_data)
+        secs  = sorted(sec_data)
         fig_s = go.Figure()
-        for rag, rc in [("GREEN", "#22c55e"), ("AMBER", "#f59e0b"), ("RED", "#ef4444")]:
-            fig_s.add_trace(go.Bar(
-                name=rag, x=secs,
-                y=[sec_data[s].get(rag, 0) for s in secs],
-                marker_color=rc))
-        fig_s.update_layout(
-            barmode="stack", height=240, margin=dict(l=0, r=0, t=4, b=0),
+        for rag, rc in [("GREEN","#22c55e"),("AMBER","#f59e0b"),("RED","#ef4444")]:
+            fig_s.add_trace(go.Bar(name=rag, x=secs,
+                y=[sec_data[s].get(rag,0) for s in secs], marker_color=rc))
+        fig_s.update_layout(barmode="stack", height=220, margin=dict(l=0,r=0,t=4,b=0),
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(color=MUTED, gridcolor=BORDER, tickangle=-35, tickfont=dict(size=9)),
-            yaxis=dict(color=MUTED, gridcolor=BORDER, tickfont=dict(size=10)),
+            xaxis=dict(color=MUTED, gridcolor=BORDER, tickangle=-35, tickfont=dict(size=8)),
+            yaxis=dict(color=MUTED, gridcolor=BORDER, tickfont=dict(size=9)),
             font=dict(color=MUTED, size=10),
-            legend=dict(orientation="h", y=1.1, font=dict(size=10)))
+            legend=dict(orientation="h", y=1.12, font=dict(size=10)))
         st.plotly_chart(fig_s, use_container_width=True)
 
     st.divider()
 
-    # ── Platform modules ──────────────────────────────────────────────────────────
-    st.markdown(
-        f'<div style="font-size:11px;letter-spacing:1px;color:{MUTED};margin-bottom:14px">'
-        f'PLATFORM MODULES</div>', unsafe_allow_html=True)
-
-    # Counterparty hero card (full width)
-    cp_stats_html = "".join([
-        f'<span style="background:{BG};border:1px solid {BORDER};border-radius:6px;'
-        f'padding:5px 12px;margin-right:10px;font-size:12px">'
-        f'<span style="color:{MUTED}">{lbl}</span> '
-        f'<span style="color:{TEXT};font-weight:700">{val}</span></span>'
-        for lbl, val in [
-            ("Counterparties", str(len(ENTITIES))),
-            ("Total EAD",      f"£{total_ead/1000:.1f}bn"),
-            ("Total ECL",      f"£{total_ecl:.0f}M"),
-            ("🔴 Critical",    str(n_red)),
-            ("🟡 High",        str(n_amber)),
-            ("Signals",        str(all_sigs)),
-        ]
-    ])
-    st.markdown(f"""
-    <div style="background:{CARD_BG};border:2px solid #3b82f6;border-radius:12px;padding:24px;margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
-        <span style="font-size:36px">🏦</span>
-        <div>
-          <div style="font-size:22px;font-weight:900;color:{TEXT}">Counterparty Risk</div>
-          <div style="font-size:11px;font-weight:700;color:#22c55e;background:#22c55e18;
-                      padding:2px 10px;border-radius:10px;display:inline-block;margin-top:4px">● LIVE</div>
-        </div>
-      </div>
-      <div style="color:{MUTED};font-size:13px;line-height:1.7;margin-bottom:16px">
-        Deep network intelligence on borrowers, bond issuers, and trading counterparties.
-        AI agents trawl news, filings, CDS markets, and alt-data to score every entity
-        and propagate signals 1–2 hops across the network — giving you early warning
-        before stress appears in financial statements.
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">{cp_stats_html}</div>
-    </div>""", unsafe_allow_html=True)
-    if st.button("Open Counterparty Portfolio →", key="mod_cp_hero", type="primary"):
-        _navigate_to("portfolio")
-
-    # Coming-soon modules (3 columns)
-    cs1, cs2, cs3 = st.columns(3, gap="medium")
-    for col, icon, title, desc in [
-        (cs1, "🌍", "Country Risk",
-         "Sovereign & macro signals, political stability, regulatory environment, "
-         "and cross-border contagion paths for 50+ jurisdictions."),
-        (cs2, "🏭", "Supplier Risk",
-         "Tier-1 and Tier-2 supply chain mapping, single-source dependencies, "
-         "factory disruption scoring and logistics stress monitoring."),
-        (cs3, "👤", "Other Entities & Actors",
-         "Risk profiles for sovereigns, central banks, politicians, and other actors "
-         "whose actions can materially move credit and equity markets."),
-    ]:
-        col.markdown(f"""
-        <div style="background:{CARD_BG};border:1px solid {BORDER};border-radius:10px;
-                    padding:20px;opacity:0.55;min-height:160px">
-          <div style="font-size:26px;margin-bottom:8px">{icon}</div>
-          <div style="font-size:15px;font-weight:700;color:{TEXT};margin-bottom:6px">{title}</div>
-          <div style="font-size:11px;color:{MUTED};line-height:1.6">{desc}</div>
-          <div style="font-size:10px;font-weight:700;color:{MUTED};margin-top:12px;
-                      letter-spacing:1px">COMING SOON</div>
-        </div>""", unsafe_allow_html=True)
-
-    # Data source overview
-    st.divider()
-    hdr_c, hdr_b = st.columns([3,1])
-    hdr_c.markdown(f'<div style="color:{MUTED};font-size:11px;font-weight:700;letter-spacing:1px;padding-top:8px">SIGNAL SOURCES  —  32 sources across 5 cadence tiers</div>', unsafe_allow_html=True)
-    with hdr_b:
-        if st.button("View all sources →", key="home_sources_btn", use_container_width=True):
-            _navigate_to("sources")
-    SOURCE_ROWS = [
-        ("⚡ Real-time",  "#ef4444",
-         "Yahoo Finance equity · CDS spreads (Markit) · Bond MTM (Bloomberg) · Twitter/X sentiment stream"),
-        ("🔄 Daily",           "#f59e0b",
-         "RavenPack news NLP · FlightAware fleet data · LinkedIn talent flow · Rating agency alerts"),
-        ("📊 Monthly / Quarterly","#3b82f6",
-         "Financial statements (EDGAR) · Satellite imagery · Eurostat/ONS macro · Glassdoor sentiment"),
-        ("🏦 Internal bank data",      "#8b5cf6",
-         "Loan covenants · Derivative MTM · Payment behaviour · RM relationship notes"),
-    ]
-    cols2 = st.columns(4)
-    for col, (label, color, items) in zip(cols2, SOURCE_ROWS):
-        col.markdown(f"""
-        <div style="background:{CARD_BG};border:1px solid {BORDER};border-radius:8px;padding:14px">
-          <div style="font-size:12px;font-weight:700;color:{color};margin-bottom:8px">{label}</div>
-          <div style="color:{MUTED};font-size:11px;line-height:1.7">{items.replace(" · ", "<br>· ")}</div>
-        </div>""", unsafe_allow_html=True)
-
-
-# ─── PAGE: PORTFOLIO ──────────────────────────────────────────────────────────
-
-def page_portfolio():
     # ── Summary stats ──────────────────────────────────────────────────────────
-    total_ead = sum(e["ead_m"] for e in ENTITIES.values())
-    total_ecl = sum(SCORES[cp]["ecl_m"] for cp in ENTITIES)
-    n_red     = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "RED")
-    n_amber   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "AMBER")
-    n_green   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "GREEN")
-
-    st.markdown("## 📊 Counterparty Portfolio")
-    m1,m2,m3,m4,m5,m6 = st.columns(6)
-    m1.metric("Counterparties", len(ENTITIES))
-    m2.metric("Total EAD",  f"£{total_ead:.0f}M")
-    m3.metric("Total ECL",  f"£{total_ecl:.1f}M")
-    m4.metric("🔴 RED",    n_red)
-    m5.metric("🟡 AMBER",  n_amber)
-    m6.metric("🟢 GREEN",  n_green)
-
-    st.divider()
 
     # ── Filters ────────────────────────────────────────────────────────────────
     all_sectors  = sorted(set(e["sector"]  for e in ENTITIES.values()))
