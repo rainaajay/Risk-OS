@@ -2085,7 +2085,7 @@ def sidebar():
         # ── Footer ────────────────────────────────────────────────────────────
         st.markdown(
             f'<div style="position:absolute;bottom:16px;left:0;right:0;text-align:center;'
-            f'color:{MUTED};font-size:10px">Risk OS v0.1 — Internal preview build</div>',
+            f'color:{MUTED};font-size:10px"> </div>',
             unsafe_allow_html=True)
 
 
