@@ -18,9 +18,15 @@ TEXT    = "#e2e8f0"
 MUTED   = "#94a3b8"
 RAG_COL = {"RED": "#ef4444", "AMBER": "#f59e0b", "GREEN": "#22c55e"}
 NODE_COL = {
-    "CP": "#3b82f6", "SUBSIDIARY": "#8b5cf6", "SUPPLIER": "#f97316",
-    "CUSTOMER": "#14b8a6", "COUNTRY": "#22c55e", "SHAREHOLDER": "#eab308",
-    "LENDER": "#ef4444", "COMPETITOR": "#ec4899", "REGULATOR": "#94a3b8",
+    "CP": "#3b82f6",        # blue
+    "SUBSIDIARY": "#8b5cf6", # violet
+    "SUPPLIER": "#f97316",   # orange
+    "CUSTOMER": "#06b6d4",   # cyan (not RAG green)
+    "COUNTRY": "#0ea5e9",    # sky blue (not RAG green)
+    "SHAREHOLDER": "#eab308",# yellow
+    "LENDER": "#f43f5e",     # rose (not RAG red)
+    "COMPETITOR": "#ec4899", # pink
+    "REGULATOR": "#a78bfa",  # lavender
 }
 EDGE_COL = {
     "OWNS": "#8b5cf6", "SUPPLIES": "#f97316", "CUSTOMER": "#14b8a6",
@@ -542,6 +548,107 @@ def _graph_to_fig(G: nx.DiGraph, height: int = 680) -> go.Figure:
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         hovermode="closest")
     return fig
+
+# ─── FALLBACK SIGNALS / SCENARIOS for network nodes ──────────────────────────
+
+def _fallback_signals(node_id: str, node_name: str, node_type: str) -> list:
+    """Generate at least 1 generic signal for a network node that has no real signals."""
+    import datetime
+    nrs = NODE_RISK_SCORES.get(node_id, {})
+    cty = COUNTRY_SCORES.get(node_id, {})
+    if nrs:
+        rag   = nrs["rag"]
+        score = nrs["score"]
+        note  = nrs.get("note","")
+        sent  = -0.55 if rag=="RED" else (-0.25 if rag=="AMBER" else 0.15)
+        sev   = "HIGH" if rag=="RED" else ("MEDIUM" if rag=="AMBER" else "LOW")
+        return [{
+            "entity_id": node_id, "headline": f"{node_name} — Risk profile: {rag} ({score})",
+            "detail": note or f"Risk intelligence score {score}/100 based on latest market data.",
+            "category": "CREDIT", "sentiment": sent, "severity": sev,
+            "score": round(abs(sent)*score/100, 2),
+            "source": "Risk OS · Internal scoring",
+            "observed_at": datetime.date.today().isoformat(),
+            "direct": True,
+        }]
+    if cty:
+        rag   = cty["rag"]
+        score = cty["score"]
+        sent  = -0.5 if rag=="RED" else (-0.2 if rag=="AMBER" else 0.1)
+        sev   = "HIGH" if rag=="RED" else ("MEDIUM" if rag=="AMBER" else "LOW")
+        flag  = cty.get("flag","")
+        return [{
+            "entity_id": node_id,
+            "headline": f"{flag} {node_name} — Country risk: {rag} ({score})",
+            "detail": cty.get("note","") or f"Sovereign risk score {score}/100.",
+            "category": "GEOPOLITICAL", "sentiment": sent, "severity": sev,
+            "score": round(abs(sent)*score/100, 2),
+            "source": "Risk OS · Country Monitor",
+            "observed_at": datetime.date.today().isoformat(),
+            "direct": True,
+        }]
+    # Generic fallback for any other node type
+    type_notes = {
+        "SUPPLIER": "supply chain dependency — monitor for disruption risk",
+        "LENDER": "syndicate lender — monitor for credit facility risk",
+        "CUSTOMER": "key customer — monitor for revenue concentration risk",
+        "SHAREHOLDER": "major shareholder — monitor for governance and ownership risk",
+        "COMPETITOR": "sector competitor — monitor for market share shifts",
+        "REGULATOR": "regulatory body — monitor for enforcement actions",
+        "SUBSIDIARY": "subsidiary entity — monitor for intra-group contagion",
+    }
+    import datetime
+    note = type_notes.get(node_type, "network entity — monitor for relationship risk")
+    return [{
+        "entity_id": node_id,
+        "headline": f"{node_name} — {node_type.title()} in network",
+        "detail": f"Network node identified as {note}. No adverse signals detected in current monitoring window.",
+        "category": "ALT_DATA", "sentiment": 0.05, "severity": "LOW",
+        "score": 0.1,
+        "source": "Risk OS · Network Monitor",
+        "observed_at": datetime.date.today().isoformat(),
+        "direct": True,
+    }]
+
+
+def _fallback_scenarios(node_id: str, node_name: str, node_type: str) -> list:
+    """Generate at least 1 generic scenario for a network node with no real scenarios."""
+    nrs = NODE_RISK_SCORES.get(node_id, {})
+    cty = COUNTRY_SCORES.get(node_id, {})
+    if nrs and nrs["rag"] in ("RED","AMBER"):
+        rag = nrs["rag"]
+        return [
+            {"name": "Stress Escalation", "dir": "worse", "prob": "20%" if rag=="RED" else "10%",
+             "impact": "Portfolio contagion",
+             "trigger": f"{node_name} risk score deteriorates further",
+             "detail": f"Adverse scenario: {nrs.get('note','')} Contagion path to linked counterparties."},
+            {"name": "Stabilisation",     "dir": "better","prob": "35%",
+             "impact": "Risk reduction",
+             "trigger": f"{node_name} stabilises; risk score improves",
+             "detail": f"Management action or market improvement reduces stress. Monitoring downgraded."},
+        ]
+    if cty:
+        return [
+            {"name": "Country Stress", "dir": "worse", "prob": "15%",
+             "impact": "Cross-border contagion",
+             "trigger": f"Political or macro deterioration in {node_name}",
+             "detail": f"{cty.get('note','')} Could affect counterparties with material exposure."},
+            {"name": "Stabilisation",  "dir": "better","prob": "40%",
+             "impact": "Risk reduction",
+             "trigger": f"{node_name} macroeconomic/political stabilisation",
+             "detail": "Credit environment improves; sovereign spreads tighten; risk score reduced."},
+        ]
+    return [
+        {"name": "Relationship Disruption", "dir": "worse",  "prob": "10%",
+         "impact": "Operational / credit impact",
+         "trigger": f"{node_name} terminates or materially changes relationship",
+         "detail": f"As a {node_type.lower()}, disruption could affect counterparty operations or credit metrics."},
+        {"name": "Relationship Deepens",    "dir": "better", "prob": "30%",
+         "impact": "Positive credit indicator",
+         "trigger": f"{node_name} expands relationship",
+         "detail": "Strengthened ties improve counterparty financial stability or liquidity access."},
+    ]
+
 
 # ─── SIGNAL CARD ──────────────────────────────────────────────────────────────
 
@@ -1447,9 +1554,6 @@ def page_full_network():
     remove = [n for n,d in G.nodes(data=True) if d.get("node_type","") not in sel_types]
     Gf = G.copy(); Gf.remove_nodes_from(remove)
     st.plotly_chart(_graph_to_fig(Gf,height=700),use_container_width=True)
-    cols = st.columns(len(NODE_COL))
-    for i,(t,c) in enumerate(NODE_COL.items()):
-        cols[i].markdown(f'<div style="text-align:center"><span style="color:{c};font-size:20px">●</span><br><span style="font-size:10px;color:{MUTED}">{t.title()}</span></div>',unsafe_allow_html=True)
 
 # ─── PAGE: ENTITY DEEP DIVE ───────────────────────────────────────────────────
 
@@ -1645,9 +1749,16 @@ def page_entity(cp_id: str):
                          + (signals_for_entity(sel_node)
                             if sel_node in ENTITIES else []))
             node_sigs = sorted(node_sigs, key=lambda x: -x["score"])
-            node_scens = SCENARIOS.get(sel_node, [])
-            nd_name    = node_map.get(sel_node, {}).get("name", sel_node)
+            nd        = node_map.get(sel_node, {})
+            nd_name   = nd.get("name", sel_node)
+            nd_type   = nd.get("type", "OTHER")
             show_label = nd_name
+            # Ensure at least 1 signal and 1 scenario
+            if not node_sigs:
+                node_sigs = _fallback_signals(sel_node, nd_name, nd_type)
+            node_scens = SCENARIOS.get(sel_node, [])
+            if not node_scens:
+                node_scens = _fallback_scenarios(sel_node, nd_name, nd_type)
         else:
             node_sigs  = sigs
             node_scens = SCENARIOS.get(cp_id, [])
@@ -1961,7 +2072,7 @@ def sidebar():
         # ── Footer ────────────────────────────────────────────────────────────
         st.markdown(
             f'<div style="position:absolute;bottom:16px;left:0;right:0;text-align:center;'
-            f'color:{MUTED};font-size:10px">Prototype v0.1 — Not for production use</div>',
+            f'color:{MUTED};font-size:10px">Risk OS v0.1 — Internal preview build</div>',
             unsafe_allow_html=True)
 
 
@@ -2062,6 +2173,17 @@ def main():
         div[data-testid="column"] { min-width: 100% !important; flex: 1 1 100% !important; }
         h2 { font-size: 1.1rem !important; }
         div[data-testid="stMetric"] label { font-size: 10px !important; }
+        /* Collapse sidebar on mobile so it doesn't overlap main content */
+        section[data-testid="stSidebar"] {
+            width: 0 !important;
+            min-width: 0 !important;
+            transform: translateX(-100%) !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            width: 260px !important;
+            transform: translateX(0) !important;
+        }
+        .main .block-container { margin-left: 0 !important; }
     }
     </style>""", unsafe_allow_html=True)
 
