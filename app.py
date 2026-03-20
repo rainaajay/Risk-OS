@@ -542,11 +542,11 @@ def _graph_to_fig(G: nx.DiGraph, height: int = 680) -> go.Figure:
     fig = go.Figure(data=edge_traces + node_traces)
     fig.update_layout(paper_bgcolor=BG, plot_bgcolor=BG, height=height,
         margin=dict(l=5,r=5,t=5,b=5),
-        legend=dict(bgcolor=CARD_BG, font=dict(color=TEXT,size=11),
-                    bordercolor=BORDER, borderwidth=1),
+        showlegend=False,
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        hovermode="closest")
+        hovermode="closest",
+        dragmode="pan")
     return fig
 
 # ─── FALLBACK SIGNALS / SCENARIOS for network nodes ──────────────────────────
@@ -1454,19 +1454,20 @@ def page_portfolio():
                              use_container_width=True):
                     _navigate_to("entity", eid)
 
-# ─── PAGE: FULL NETWORK ───────────────────────────────────────────────────────
-
-def page_full_network():
-    st.markdown("## Full Portfolio Network")
-    st.caption(f"All {len(ENTITIES)} counterparties + complete ecosystems. CP size = EAD. CP colour = RAG.")
+    # ── Full portfolio network (embedded) ────────────────────────────────────
+    st.divider()
+    st.markdown(f'<div style="font-size:16px;font-weight:700;color:{TEXT};margin-bottom:4px">'
+                f'🕸️ Full Portfolio Network</div>', unsafe_allow_html=True)
+    st.caption("Click any counterparty node to open its deep-dive. Hover for details.")
     all_types = list(NODE_COL.keys())
-    sel_types = st.multiselect("Node types",options=all_types,default=all_types,key="full_net_types")
-    G = _build_full_graph()
-    remove = [n for n,d in G.nodes(data=True) if d.get("node_type","") not in sel_types]
-    Gf = G.copy(); Gf.remove_nodes_from(remove)
-    st.caption("Click a counterparty node (blue) to open its deep-dive page.")
+    sel_types = st.multiselect("Filter node types", options=all_types, default=all_types,
+                               key="full_net_types")
+    G  = _build_full_graph()
+    Gf = G.copy()
+    Gf.remove_nodes_from([n for n, d in G.nodes(data=True)
+                          if d.get("node_type", "") not in sel_types])
     try:
-        event = st.plotly_chart(_graph_to_fig(Gf, height=700), use_container_width=True,
+        event = st.plotly_chart(_graph_to_fig(Gf, height=680), use_container_width=True,
                                 on_select="rerun", key="full_net_chart",
                                 selection_mode=["points"])
         if event and hasattr(event, "selection") and event.selection:
@@ -1476,7 +1477,11 @@ def page_full_network():
                 if clicked_id and clicked_id in ENTITIES:
                     _navigate_to("entity", clicked_id)
     except Exception:
-        st.plotly_chart(_graph_to_fig(Gf, height=700), use_container_width=True)
+        st.plotly_chart(_graph_to_fig(Gf, height=680), use_container_width=True)
+
+
+def page_full_network():
+    _navigate_to("portfolio")
 
 # ─── PAGE: ENTITY DEEP DIVE ───────────────────────────────────────────────────
 
@@ -1570,6 +1575,9 @@ def page_entity(cp_id: str):
                              "country": e2["country"], "note": e2["description"][:120]}
 
     # ── Two-column layout: Network left | Signals+Scenarios right ─────────────
+    sel_node_pre   = st.session_state.get(f"node_sel_{cp_id}", "— select node —")
+    non_cp_selected = (sel_node_pre and sel_node_pre != "— select node —"
+                       and sel_node_pre not in ENTITIES)
     net_col, info_col = st.columns([3, 2], gap="large")
 
     # ── LEFT: Network ──────────────────────────────────────────────────────────
@@ -1589,24 +1597,29 @@ def page_entity(cp_id: str):
                 f'<div style="font-size:10px;color:{MUTED}">{t.title()}</div></div>',
                 unsafe_allow_html=True)
 
-        # Network graph
-        G_ego = _build_ego_graph(cp_id)
-        fig   = _graph_to_fig(G_ego, height=480)
-        st.caption("Click any node to inspect it. Click a counterparty (blue) to navigate to its page.")
-        try:
-            event = st.plotly_chart(fig, use_container_width=True,
-                                    on_select="rerun", key=f"ego_{cp_id}",
-                                    selection_mode=["points"])
-            if event and hasattr(event, "selection") and event.selection:
-                pts = event.selection.get("points", [])
-                if pts:
-                    clicked_id = pts[0].get("customdata")
-                    if clicked_id and clicked_id in ENTITIES and clicked_id != cp_id:
-                        _navigate_to("entity", clicked_id)
-                    elif clicked_id:
-                        st.session_state[f"node_sel_{cp_id}"] = clicked_id
-        except Exception:
-            st.plotly_chart(fig, use_container_width=True)
+        # Network graph — hidden when inspecting a non-CP node
+        if non_cp_selected:
+            if st.button("← Back to network", key=f"back_net_{cp_id}"):
+                st.session_state[f"node_sel_{cp_id}"] = "— select node —"
+                st.rerun()
+        else:
+            G_ego = _build_ego_graph(cp_id)
+            fig   = _graph_to_fig(G_ego, height=480)
+            st.caption("Click any node to inspect it. Click a counterparty (blue) to open it.")
+            try:
+                event = st.plotly_chart(fig, use_container_width=True,
+                                        on_select="rerun", key=f"ego_{cp_id}",
+                                        selection_mode=["points"])
+                if event and hasattr(event, "selection") and event.selection:
+                    pts = event.selection.get("points", [])
+                    if pts:
+                        clicked_id = pts[0].get("customdata")
+                        if clicked_id and clicked_id in ENTITIES and clicked_id != cp_id:
+                            _navigate_to("entity", clicked_id)
+                        elif clicked_id:
+                            st.session_state[f"node_sel_{cp_id}"] = clicked_id
+            except Exception:
+                st.plotly_chart(fig, use_container_width=True)
 
         # Node inspector dropdown
         sel_opts = ["— select node —"] + sorted(node_map.keys(),
@@ -1925,9 +1938,8 @@ def sidebar():
             f'NAVIGATION</div>', unsafe_allow_html=True)
 
         NAV = [
-            ("home",      "📊", "Executive Dashboard"),
-            ("portfolio", "🕸️", "Network Explorer"),
-            ("network",   "🔍", "Full Network View"),
+            ("home",      "📊", "Home"),
+            ("portfolio", "🏦", "Counterparty"),
             ("sources",   "📡", "Signal Feed"),
             ("agents",    "🤖", "AI Agents"),
         ]
@@ -2014,6 +2026,7 @@ def _top_nav():
     elif page == "sources":            crumb_parts.append("Signal Sources")
     elif page == "agents":             crumb_parts.append("AI Agents")
     elif page == "entity" and cp_name: crumb_parts += ["Counterparty", cp_name]
+    elif page == "network":            crumb_parts.append("Counterparty")
 
     sep = " <span style='color:#475569'>›</span> "
     crumb_spans = []
@@ -2028,13 +2041,12 @@ def _top_nav():
     # Nav buttons + CP dropdown in one row
     NAV = [
         ("🏠 Home",        "home",     "tnb_home"),
-        ("📊 Portfolio",   "portfolio","tnb_port"),
-        ("🕸️ Network",    "network",  "tnb_net"),
+        ("🏦 Counterparty","portfolio","tnb_port"),
         ("📡 Sources",     "sources",  "tnb_src"),
         ("🤖 Agents",      "agents",   "tnb_agents"),
     ]
-    btn_cols = st.columns([1, 1, 1, 1, 1, 2])
-    for col, (label, target, key) in zip(btn_cols[:5], NAV):
+    btn_cols = st.columns([1, 1, 1, 1, 2])
+    for col, (label, target, key) in zip(btn_cols[:4], NAV):
         active = (page == target) or (page == "entity" and target == "portfolio")
         with col:
             if active:
@@ -2048,7 +2060,7 @@ def _top_nav():
                     _navigate_to(target)
 
     # Sector + Country quick-filters (right side of nav)
-    with btn_cols[5]:
+    with btn_cols[4]:
         qf1, qf2 = st.columns(2)
         all_sectors = ["All sectors"] + sorted(set(e["sector"] for e in ENTITIES.values()))
         seen_c2: dict = {}
