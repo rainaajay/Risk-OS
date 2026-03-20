@@ -1259,139 +1259,69 @@ def page_home():
 
     st.divider()
 
-    # ── Module tiles ─────────────────────────────────────────────────────────────
+    # ── Platform modules ──────────────────────────────────────────────────────────
     st.markdown(
-        f'<div style="font-size:14px;font-weight:700;color:{TEXT};margin-bottom:12px">'
-        f'Modules</div>', unsafe_allow_html=True)
-    mc1, mc2, mc3, mc4 = st.columns(4, gap="small")
-    for col, icon, title, desc, active in [
-        (mc1, "🏦", "Counterparty", f"{len(ENTITIES)} entities · LIVE", True),
-        (mc2, "🌍", "Country",      "Sovereign risk · Coming soon",      False),
-        (mc3, "🏭", "Supplier",     "Supply chain · Coming soon",        False),
-        (mc4, "👤", "Others",       "Key-person risk · Coming soon",     False),
-    ]:
-        border = "#3b82f6" if active else BORDER
-        opacity = "1" if active else "0.45"
-        col.markdown(
-            f'<div style="background:{CARD_BG};border:1px solid {border};border-radius:10px;'
-            f'padding:18px;text-align:center;opacity:{opacity};margin-bottom:8px">'
-            f'<div style="font-size:28px">{icon}</div>'
-            f'<div style="font-weight:700;color:{TEXT};margin-top:6px;font-size:14px">{title}</div>'
-            f'<div style="color:{MUTED};font-size:11px;margin-top:4px">{desc}</div>'
-            f'</div>', unsafe_allow_html=True)
-        if active:
-            if col.button("Open →", key=f"mod_{title}", use_container_width=True, type="primary"):
-                _navigate_to("portfolio")
+        f'<div style="font-size:11px;letter-spacing:1px;color:{MUTED};margin-bottom:14px">'
+        f'PLATFORM MODULES</div>', unsafe_allow_html=True)
 
-    # ── Signal sources strip ─────────────────────────────────────────────────────
-    st.divider()
-    hdr_c, hdr_b = st.columns([4, 1])
-    hdr_c.markdown(
-        f'<div style="color:{MUTED};font-size:11px;font-weight:700;letter-spacing:1px;padding-top:8px">'
-        f'SIGNAL SOURCES  —  32 sources across 5 cadence tiers</div>', unsafe_allow_html=True)
-    with hdr_b:
-        if st.button("View all sources →", key="home_sources_btn", use_container_width=True):
-            _navigate_to("sources")
-
+    # Counterparty hero card (full width)
+    cp_stats_html = "".join([
+        f'<span style="background:{BG};border:1px solid {BORDER};border-radius:6px;'
+        f'padding:5px 12px;margin-right:10px;font-size:12px">'
+        f'<span style="color:{MUTED}">{lbl}</span> '
+        f'<span style="color:{TEXT};font-weight:700">{val}</span></span>'
+        for lbl, val in [
+            ("Counterparties", str(len(ENTITIES))),
+            ("Total EAD",      f"£{total_ead/1000:.1f}bn"),
+            ("Total ECL",      f"£{total_ecl:.0f}M"),
+            ("🔴 Critical",    str(n_red)),
+            ("🟡 High",        str(n_amber)),
+            ("Signals",        str(all_sigs)),
+        ]
+    ])
     st.markdown(f"""
-    <div style="text-align:center;padding:40px 0 28px">
-      <div style="font-size:36px;font-weight:900;letter-spacing:-1px;color:{TEXT}">
-        Risk <span style="color:#3b82f6">OS</span>
+    <div style="background:{CARD_BG};border:2px solid #3b82f6;border-radius:12px;padding:24px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+        <span style="font-size:36px">🏦</span>
+        <div>
+          <div style="font-size:22px;font-weight:900;color:{TEXT}">Counterparty Risk</div>
+          <div style="font-size:11px;font-weight:700;color:#22c55e;background:#22c55e18;
+                      padding:2px 10px;border-radius:10px;display:inline-block;margin-top:4px">● LIVE</div>
+        </div>
       </div>
-      <div style="color:{MUTED};font-size:15px;margin-top:6px">
-        AI-powered counterparty risk intelligence — monitor, score, and stress-test
-        any entity and its full network in real time
+      <div style="color:{MUTED};font-size:13px;line-height:1.7;margin-bottom:16px">
+        Deep network intelligence on borrowers, bond issuers, and trading counterparties.
+        AI agents trawl news, filings, CDS markets, and alt-data to score every entity
+        and propagate signals 1–2 hops across the network — giving you early warning
+        before stress appears in financial statements.
       </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">{cp_stats_html}</div>
     </div>""", unsafe_allow_html=True)
+    if st.button("Open Counterparty Portfolio →", key="mod_cp_hero", type="primary"):
+        _navigate_to("portfolio")
 
-    MODULES = [
-        {
-            "icon": "🏦", "title": "Counterparty",
-            "desc": "Full network intelligence on borrowers and trading counterparties. "
-                    "Signals 1–2 hops away, scored and stress-tested.",
-            "status": "LIVE",
-            "stats": [
-                ("Counterparties", str(len(ENTITIES))),
-                ("Total EAD", f"£{total_ead:.0f}M"),
-                ("Total ECL", f"£{total_ecl:.1f}M"),
-                ("🔴 RED", str(n_red)),
-                ("🟡 AMBER", str(n_amber)),
-            ],
-            "action": "portfolio",
-            "btn": "Open Portfolio →",
-            "color": "#3b82f6",
-        },
-        {
-            "icon": "🌍", "title": "Country",
-            "desc": "Sovereign risk monitors: macro signals, political stability, "
-                    "regulatory environment, and cross-border contagion paths.",
-            "status": "COMING SOON",
-            "stats": [],
-            "action": None,
-            "btn": "Coming Soon",
-            "color": "#22c55e",
-        },
-        {
-            "icon": "🏭", "title": "Supplier",
-            "desc": "Supply chain risk: Tier-1 and Tier-2 supplier networks, "
-                    "single-source dependencies, and operational disruption scoring.",
-            "status": "COMING SOON",
-            "stats": [],
-            "action": None,
-            "btn": "Coming Soon",
-            "color": "#f97316",
-        },
-        {
-            "icon": "👤", "title": "Others",
-            "desc": "Key-person risk: politicians, central bankers, tech leaders, "
-                    "and other individuals who can have a material impact on firm value.",
-            "status": "COMING SOON",
-            "stats": [],
-            "action": None,
-            "btn": "Coming Soon",
-            "color": "#8b5cf6",
-        },
-    ]
-
-    cols = st.columns(2, gap="large")
-    for i, m in enumerate(MODULES):
-        with cols[i % 2]:
-            live = m["status"] == "LIVE"
-            status_col = "#22c55e" if live else MUTED
-            status_bg  = "#22c55e18" if live else "#1e293b"
-            border_col = m["color"] if live else BORDER
-            st.markdown(f"""
-            <div style="background:{CARD_BG};border:1px solid {border_col};border-radius:12px;
-                        padding:24px;margin-bottom:20px;min-height:220px">
-              <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">
-                <div style="display:flex;align-items:center;gap:12px">
-                  <span style="font-size:32px">{m['icon']}</span>
-                  <div>
-                    <div style="font-size:20px;font-weight:800;color:{TEXT}">{m['title']}</div>
-                    <div style="font-size:11px;font-weight:700;color:{status_col};
-                                background:{status_bg};padding:2px 8px;border-radius:10px;
-                                display:inline-block;margin-top:4px">{m['status']}</div>
-                  </div>
-                </div>
-              </div>
-              <div style="color:{MUTED};font-size:13px;line-height:1.6;margin-bottom:16px">
-                {m['desc']}
-              </div>
-              {"".join([
-                f'<span style="background:{BG};border:1px solid {BORDER};border-radius:6px;'
-                f'padding:4px 10px;margin-right:8px;font-size:12px">'
-                f'<span style="color:{MUTED}">{s[0]}</span> '
-                f'<span style="color:{TEXT};font-weight:700">{s[1]}</span></span>'
-                for s in m["stats"]
-              ])}
-            </div>""", unsafe_allow_html=True)
-            if live:
-                if st.button(m["btn"], key=f"mod_{m['title']}", use_container_width=True,
-                             type="primary"):
-                    _navigate_to(m["action"])
-            else:
-                st.button(m["btn"], key=f"mod_{m['title']}", use_container_width=True,
-                          disabled=True)
+    # Coming-soon modules (3 columns)
+    cs1, cs2, cs3 = st.columns(3, gap="medium")
+    for col, icon, title, desc in [
+        (cs1, "🌍", "Country Risk",
+         "Sovereign & macro signals, political stability, regulatory environment, "
+         "and cross-border contagion paths for 50+ jurisdictions."),
+        (cs2, "🏭", "Supplier Risk",
+         "Tier-1 and Tier-2 supply chain mapping, single-source dependencies, "
+         "factory disruption scoring and logistics stress monitoring."),
+        (cs3, "👤", "Key-Person Risk",
+         "Risk profiles for politicians, central bankers, and executives whose "
+         "actions can materially move credit and equity markets."),
+    ]:
+        col.markdown(f"""
+        <div style="background:{CARD_BG};border:1px solid {BORDER};border-radius:10px;
+                    padding:20px;opacity:0.55;min-height:160px">
+          <div style="font-size:26px;margin-bottom:8px">{icon}</div>
+          <div style="font-size:15px;font-weight:700;color:{TEXT};margin-bottom:6px">{title}</div>
+          <div style="font-size:11px;color:{MUTED};line-height:1.6">{desc}</div>
+          <div style="font-size:10px;font-weight:700;color:{MUTED};margin-top:12px;
+                      letter-spacing:1px">COMING SOON</div>
+        </div>""", unsafe_allow_html=True)
 
     # Data source overview
     st.divider()
