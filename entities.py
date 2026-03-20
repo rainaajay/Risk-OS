@@ -125,6 +125,14 @@ from networks_a import NETWORKS_A  # CP001, CP003, CP005, CP006, CP007
 from networks_b import NETWORKS_B  # CP009, CP013, CP023, CP028, CP033
 NETWORKS: Dict[str, Dict] = {**NETWORKS_A, **NETWORKS_B}
 
+# ─────────────────────────────────────────────────────────────
+# EXTENDED COUNTERPARTY DATA  (CP034–CP123, 90 new entities)
+# ─────────────────────────────────────────────────────────────
+from entities_ext_a import ENTITIES_EXT_A, SIGNALS_EXT_A
+from entities_ext_b import ENTITIES_EXT_B, SIGNALS_EXT_B
+from entities_ext_c import ENTITIES_EXT_C, SIGNALS_EXT_C
+ENTITIES.update({**ENTITIES_EXT_A, **ENTITIES_EXT_B, **ENTITIES_EXT_C})
+
 _NETWORKS_PLACEHOLDER = {  # kept for reference only — not used
 
     "CP001": {  # Volkswagen
@@ -1059,6 +1067,11 @@ SIGNALS: List[Dict] = [
     },
 ]
 
+# Append extended signals from the 90-entity expansion
+SIGNALS.extend(SIGNALS_EXT_A)
+SIGNALS.extend(SIGNALS_EXT_B)
+SIGNALS.extend(SIGNALS_EXT_C)
+
 
 # ─────────────────────────────────────────────────────────────
 # COMPUTED SCORES
@@ -1103,6 +1116,15 @@ _CAT_W: Dict[str, tuple] = {
     "SHAREHOLDER_RISK":      (0.9, 0.10, 0.10, 0.80),
     "RECOVERY":              (1.0, 0.50, 0.30, 0.20),
 }
+# Short-form aliases used by extended signal data
+_CAT_W["FINANCIAL"]   = _CAT_W["FINANCIAL_STRESS"]
+_CAT_W["CREDIT"]      = _CAT_W["RATING_ACTION"]
+_CAT_W["LEGAL"]       = _CAT_W["LEGAL_REGULATORY"]
+_CAT_W["REGULATORY"]  = _CAT_W["REGULATORY_ACTION"]
+_CAT_W["SUPPLY_CHAIN"]= _CAT_W["SUPPLIER_RISK"]
+_CAT_W["GEOPOLITICAL"]= _CAT_W["COUNTRY_RISK"]
+_CAT_W["ALT_DATA"]    = _CAT_W.get("MARKET_POSITION", (1.0, 0.33, 0.34, 0.33))
+
 _CAT_W_DEFAULT = (1.0, 0.33, 0.34, 0.33)
 
 

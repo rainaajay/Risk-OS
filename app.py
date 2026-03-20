@@ -1039,8 +1039,152 @@ def page_sources():
 def page_home():
     total_ead = sum(e["ead_m"] for e in ENTITIES.values())
     total_ecl = sum(SCORES[cp]["ecl_m"] for cp in ENTITIES)
-    n_red   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"]=="RED")
-    n_amber = sum(1 for cp in ENTITIES if SCORES[cp]["rag"]=="AMBER")
+    n_red    = sum(1 for cp in ENTITIES if SCORES[cp]["rag"]=="RED")
+    n_amber  = sum(1 for cp in ENTITIES if SCORES[cp]["rag"]=="AMBER")
+    n_green  = sum(1 for cp in ENTITIES if SCORES[cp]["rag"]=="GREEN")
+    all_sigs = len(SIGNALS)
+
+    # ── Header ──────────────────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:26px;font-weight:900;color:{TEXT};margin-bottom:4px">'
+        f'📊 Executive Early Warning Dashboard</div>'
+        f'<div style="color:{MUTED};font-size:12px;margin-bottom:20px">'
+        f'Risk OS · {len(ENTITIES)} entities monitored · {all_sigs} live signals</div>',
+        unsafe_allow_html=True)
+
+    # ── Top stat boxes ───────────────────────────────────────────────────────────
+    for col, val, label, col_c in zip(
+        st.columns(5),
+        [n_red, n_amber, n_green, f"£{total_ead/1000:.1f}bn", f"£{total_ecl:.0f}M"],
+        ["CRITICAL", "HIGH", "NORMAL", "TOTAL EAD", "ECL UPLIFT"],
+        ["#ef4444", "#f59e0b", "#22c55e", TEXT, "#f59e0b"],
+    ):
+        col.markdown(
+            f'<div style="background:{CARD_BG};border:1px solid {BORDER};border-radius:10px;'
+            f'padding:18px 12px;text-align:center;margin-bottom:16px">'
+            f'<div style="font-size:34px;font-weight:900;color:{col_c};line-height:1">{val}</div>'
+            f'<div style="font-size:10px;letter-spacing:2px;color:{MUTED};margin-top:6px">{label}</div>'
+            f'</div>', unsafe_allow_html=True)
+
+    # ── Main content: table left, charts right ────────────────────────────────
+    tbl_col, chart_col = st.columns([3, 2], gap="large")
+
+    with tbl_col:
+        st.markdown(
+            f'<div style="font-size:16px;font-weight:700;color:{TEXT};margin-bottom:10px">'
+            f'🚨 Top Risk Entities</div>', unsafe_allow_html=True)
+        top_ids = sorted(ENTITIES.keys(), key=lambda x: -SCORES[x]["composite"])[:18]
+        rag_label = {"RED": "CRITICAL", "AMBER": "HIGH", "GREEN": "NORMAL"}
+        rows_html = ""
+        for eid in top_ids:
+            ent = ENTITIES[eid]; sc = SCORES[eid]
+            rc  = RAG_COL.get(sc["rag"], MUTED)
+            rows_html += (
+                f'<tr style="border-bottom:1px solid {BORDER}">'
+                f'<td style="padding:7px 6px;color:{TEXT};font-weight:600;white-space:nowrap">'
+                f'{ent["flag"]} {ent["short"]}</td>'
+                f'<td style="padding:7px 6px;color:{MUTED};font-size:11px">{ent["sector"]}</td>'
+                f'<td style="padding:7px 6px;text-align:right;color:{rc};font-weight:700">'
+                f'{sc["composite"]:.0f}</td>'
+                f'<td style="padding:7px 6px;text-align:center">'
+                f'<span style="background:{rc}22;color:{rc};padding:2px 7px;border-radius:4px;'
+                f'font-size:10px;font-weight:700">{rag_label.get(sc["rag"],"—")}</span></td>'
+                f'<td style="padding:7px 6px;text-align:right;color:{TEXT}">{ent["ead_m"]:.0f}</td>'
+                f'<td style="padding:7px 6px;text-align:right;color:{rc}">{sc["ecl_m"]:.1f}</td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+            f'<thead><tr style="border-bottom:2px solid {BORDER}">'
+            f'<th style="text-align:left;padding:6px;color:{MUTED}">Entity</th>'
+            f'<th style="text-align:left;padding:6px;color:{MUTED}">Sector</th>'
+            f'<th style="text-align:right;padding:6px;color:{MUTED}">Score</th>'
+            f'<th style="text-align:center;padding:6px;color:{MUTED}">RAG</th>'
+            f'<th style="text-align:right;padding:6px;color:{MUTED}">EAD £M</th>'
+            f'<th style="text-align:right;padding:6px;color:{MUTED}">ECL £M</th>'
+            f'</tr></thead><tbody>{rows_html}</tbody></table>',
+            unsafe_allow_html=True)
+
+    with chart_col:
+        # Score distribution histogram
+        st.markdown(
+            f'<div style="font-size:14px;font-weight:700;color:{TEXT};margin-bottom:6px">'
+            f'Score Distribution</div>', unsafe_allow_html=True)
+        scores_list = [SCORES[cp]["composite"] for cp in ENTITIES]
+        fig_h = go.Figure(go.Histogram(
+            x=scores_list, nbinsx=10,
+            marker_color="#3b82f6", marker_line_color=BG, marker_line_width=1))
+        fig_h.add_vline(x=70, line_color="#ef4444", line_dash="dash", line_width=1)
+        fig_h.add_vline(x=30, line_color="#f59e0b", line_dash="dash", line_width=1)
+        fig_h.update_layout(
+            height=200, margin=dict(l=0, r=0, t=4, b=0),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(title="Composite Risk Score", color=MUTED, gridcolor=BORDER, tickfont=dict(size=10)),
+            yaxis=dict(title="# Entities", color=MUTED, gridcolor=BORDER, tickfont=dict(size=10)),
+            font=dict(color=MUTED, size=10), showlegend=False)
+        st.plotly_chart(fig_h, use_container_width=True)
+
+        # Sector risk concentration
+        st.markdown(
+            f'<div style="font-size:14px;font-weight:700;color:{TEXT};margin-bottom:6px">'
+            f'Sector Risk Concentration</div>', unsafe_allow_html=True)
+        sec_data: dict = {}
+        for cp in ENTITIES:
+            s   = ENTITIES[cp]["sector"]
+            rag = SCORES[cp]["rag"]
+            sec_data.setdefault(s, {"RED": 0, "AMBER": 0, "GREEN": 0})
+            sec_data[s][rag] += 1
+        secs = sorted(sec_data)
+        fig_s = go.Figure()
+        for rag, rc in [("GREEN", "#22c55e"), ("AMBER", "#f59e0b"), ("RED", "#ef4444")]:
+            fig_s.add_trace(go.Bar(
+                name=rag, x=secs,
+                y=[sec_data[s].get(rag, 0) for s in secs],
+                marker_color=rc))
+        fig_s.update_layout(
+            barmode="stack", height=240, margin=dict(l=0, r=0, t=4, b=0),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(color=MUTED, gridcolor=BORDER, tickangle=-35, tickfont=dict(size=9)),
+            yaxis=dict(color=MUTED, gridcolor=BORDER, tickfont=dict(size=10)),
+            font=dict(color=MUTED, size=10),
+            legend=dict(orientation="h", y=1.1, font=dict(size=10)))
+        st.plotly_chart(fig_s, use_container_width=True)
+
+    st.divider()
+
+    # ── Module tiles ─────────────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:14px;font-weight:700;color:{TEXT};margin-bottom:12px">'
+        f'Modules</div>', unsafe_allow_html=True)
+    mc1, mc2, mc3, mc4 = st.columns(4, gap="small")
+    for col, icon, title, desc, active in [
+        (mc1, "🏦", "Counterparty", f"{len(ENTITIES)} entities · LIVE", True),
+        (mc2, "🌍", "Country",      "Sovereign risk · Coming soon",      False),
+        (mc3, "🏭", "Supplier",     "Supply chain · Coming soon",        False),
+        (mc4, "👤", "Others",       "Key-person risk · Coming soon",     False),
+    ]:
+        border = "#3b82f6" if active else BORDER
+        opacity = "1" if active else "0.45"
+        col.markdown(
+            f'<div style="background:{CARD_BG};border:1px solid {border};border-radius:10px;'
+            f'padding:18px;text-align:center;opacity:{opacity};margin-bottom:8px">'
+            f'<div style="font-size:28px">{icon}</div>'
+            f'<div style="font-weight:700;color:{TEXT};margin-top:6px;font-size:14px">{title}</div>'
+            f'<div style="color:{MUTED};font-size:11px;margin-top:4px">{desc}</div>'
+            f'</div>', unsafe_allow_html=True)
+        if active:
+            if col.button("Open →", key=f"mod_{title}", use_container_width=True, type="primary"):
+                _navigate_to("portfolio")
+
+    # ── Signal sources strip ─────────────────────────────────────────────────────
+    st.divider()
+    hdr_c, hdr_b = st.columns([4, 1])
+    hdr_c.markdown(
+        f'<div style="color:{MUTED};font-size:11px;font-weight:700;letter-spacing:1px;padding-top:8px">'
+        f'SIGNAL SOURCES  —  32 sources across 5 cadence tiers</div>', unsafe_allow_html=True)
+    with hdr_b:
+        if st.button("View all sources →", key="home_sources_btn", use_container_width=True):
+            _navigate_to("sources")
 
     st.markdown(f"""
     <div style="text-align:center;padding:40px 0 28px">
@@ -1171,54 +1315,126 @@ def page_home():
 # ─── PAGE: PORTFOLIO ──────────────────────────────────────────────────────────
 
 def page_portfolio():
+    # ── Summary stats ──────────────────────────────────────────────────────────
     total_ead = sum(e["ead_m"] for e in ENTITIES.values())
     total_ecl = sum(SCORES[cp]["ecl_m"] for cp in ENTITIES)
     n_red     = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "RED")
     n_amber   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "AMBER")
-    st.markdown("## Portfolio Overview")
-    m1,m2,m3,m4,m5 = st.columns(5)
-    m1.metric("Counterparties","10")
-    m2.metric("Total EAD",f"£{total_ead:.0f}M")
-    m3.metric("Total ECL",f"£{total_ecl:.1f}M")
-    m4.metric("🔴 RED",str(n_red))
-    m5.metric("🟡 AMBER",str(n_amber))
+    n_green   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "GREEN")
+
+    st.markdown("## 📊 Counterparty Portfolio")
+    m1,m2,m3,m4,m5,m6 = st.columns(6)
+    m1.metric("Counterparties", len(ENTITIES))
+    m2.metric("Total EAD",  f"£{total_ead:.0f}M")
+    m3.metric("Total ECL",  f"£{total_ecl:.1f}M")
+    m4.metric("🔴 RED",    n_red)
+    m5.metric("🟡 AMBER",  n_amber)
+    m6.metric("🟢 GREEN",  n_green)
+
     st.divider()
-    hc = st.columns([2.5,0.8,0.9,1.0,0.9,4.0,1.2])
-    for col,label in zip(hc,["Entity","Rating","EAD","Score","ECL","Top Signal",""]):
-        col.markdown(f'<div style="color:{MUTED};font-size:11px;font-weight:600;padding-bottom:6px">{label}</div>',
-                     unsafe_allow_html=True)
-    st.markdown(f'<div style="border-top:1px solid {BORDER}"></div>',unsafe_allow_html=True)
-    sorted_cps = sorted(ENTITIES.keys(), key=lambda cp: -SCORES[cp]["composite"])
-    for cp_id in sorted_cps:
-        ent=ENTITIES[cp_id]; sc=SCORES[cp_id]
-        sigs=signals_for_entity(cp_id); top=sigs[0] if sigs else None
-        rag=sc["rag"]; rag_c=RAG_COL.get(rag,MUTED); r_col=rating_color(ent["rating"])
-        c_name,c_rat,c_ead,c_score,c_ecl,c_sig,c_btn = st.columns([2.5,0.8,0.9,1.0,0.9,4.0,1.2])
-        with c_name:
-            st.markdown(f"""<div style="padding:10px 0;display:flex;align-items:center;gap:8px">
-              <span style="font-size:20px">{ent['flag']}</span>
-              <div><div style="font-weight:700;color:{TEXT};font-size:14px">{ent['name']}</div>
-              <div style="color:{MUTED};font-size:11px">{ent['sector']}</div></div></div>""",
-                        unsafe_allow_html=True)
-        with c_rat:
-            st.markdown(f'<div style="padding:14px 0;text-align:center"><div style="font-size:15px;font-weight:700;color:{r_col}">{ent["rating"]}</div></div>',unsafe_allow_html=True)
-        with c_ead:
-            st.markdown(f'<div style="padding:14px 0;text-align:center"><div style="font-size:14px;font-weight:600;color:{TEXT}">£{ent["ead_m"]:.0f}M</div></div>',unsafe_allow_html=True)
-        with c_score:
-            st.markdown(f'<div style="padding:10px 0;text-align:center"><div style="font-size:18px;font-weight:800;color:{rag_c}">{sc["composite"]:.0f}</div><div style="font-size:11px;color:{rag_c}">{rag}</div></div>',unsafe_allow_html=True)
-        with c_ecl:
-            st.markdown(f'<div style="padding:14px 0;text-align:center"><div style="font-size:14px;font-weight:600;color:{TEXT}">£{sc["ecl_m"]:.1f}M</div></div>',unsafe_allow_html=True)
-        with c_sig:
+
+    # ── Filters ────────────────────────────────────────────────────────────────
+    all_sectors  = sorted(set(e["sector"]  for e in ENTITIES.values()))
+    # Build country options with flags, deduplicated
+    seen_c: dict = {}
+    for e in ENTITIES.values():
+        seen_c[e["country"]] = e.get("flag", "")
+    country_opts = [f'{seen_c[c]} {c}' for c in sorted(seen_c)]
+
+    fc1, fc2, fc3, fc4 = st.columns([2, 2, 1.5, 1.5])
+    with fc1:
+        sel_sectors = st.multiselect("🏭 Sector", all_sectors,
+                                     default=st.session_state.get("pf_sectors", []),
+                                     key="pf_sectors", placeholder="All sectors")
+    with fc2:
+        sel_countries_disp = st.multiselect("🌍 HQ Country", country_opts,
+                                             default=st.session_state.get("pf_countries", []),
+                                             key="pf_countries", placeholder="All countries")
+        sel_countries = [c.split()[-1] for c in sel_countries_disp]
+    with fc3:
+        sel_rag = st.selectbox("🚦 Risk", ["All","🔴 RED","🟡 AMBER","🟢 GREEN"],
+                               key="pf_rag")
+    with fc4:
+        sort_by = st.selectbox("Sort", ["Risk Score ↓","EAD ↓","Rating","Name"],
+                               key="pf_sort")
+
+    # ── Apply filters ──────────────────────────────────────────────────────────
+    def _passes(eid):
+        e  = ENTITIES[eid]; s = SCORES[eid]
+        if sel_sectors  and e["sector"]  not in sel_sectors:  return False
+        if sel_countries and e["country"] not in sel_countries: return False
+        if sel_rag != "All" and s["rag"] not in sel_rag:        return False
+        return True
+
+    RATING_ORDER = {"AAA":0,"AA+":1,"AA":2,"AA-":3,"A+":4,"A":5,"A-":6,
+                    "BBB+":7,"BBB":8,"BBB-":9,"BB+":10,"BB":11,"BB-":12,
+                    "B+":13,"B":14,"B-":15,"CCC":16,"CC":17,"C":18,"D":19}
+
+    def _sort_key(eid):
+        e = ENTITIES[eid]; s = SCORES[eid]
+        if sort_by == "Risk Score ↓": return -s["composite"]
+        if sort_by == "EAD ↓":        return -e["ead_m"]
+        if sort_by == "Rating":        return RATING_ORDER.get(e["rating"], 20)
+        return e["short"]
+
+    filtered = sorted([eid for eid in ENTITIES if _passes(eid)], key=_sort_key)
+
+    st.markdown(
+        f'<div style="color:{MUTED};font-size:12px;margin-bottom:14px">'
+        f'Showing <b style="color:{TEXT}">{len(filtered)}</b> of {len(ENTITIES)} counterparties</div>',
+        unsafe_allow_html=True)
+
+    if not filtered:
+        st.info("No counterparties match the selected filters.")
+        return
+
+    # ── Card grid (3 per row) ──────────────────────────────────────────────────
+    COLS = 3
+    for row_start in range(0, len(filtered), COLS):
+        row_ids = filtered[row_start : row_start + COLS]
+        cols    = st.columns(COLS)
+        for col, eid in zip(cols, row_ids):
+            ent   = ENTITIES[eid]; sc = SCORES[eid]
+            rag_c = RAG_COL.get(sc["rag"], MUTED)
+            r_c   = rating_color(ent["rating"])
+            sigs  = signals_for_entity(eid)
+            top   = sigs[0] if sigs else None
+            top_txt = ""
             if top:
-                sc2=sent_color(top["sentiment"])
-                dlbl="direct" if top.get("direct",True) else f"via {top.get('related_entity','?')}"
-                st.markdown(f'<div style="padding:8px 0"><div style="font-size:12px;color:{sc2};font-weight:600;line-height:1.4">{sentiment_icon(top["sentiment"])} {top["headline"][:75]}{"…" if len(top["headline"])>75 else ""}</div><div style="font-size:11px;color:{MUTED}">{top["category"]} · {dlbl} · {top["observed_at"]}</div></div>',unsafe_allow_html=True)
-        with c_btn:
-            st.markdown("<div style='padding-top:8px'>",unsafe_allow_html=True)
-            if st.button("Deep Dive →",key=f"dd_{cp_id}",use_container_width=True):
-                _navigate_to("entity",cp_id)
-            st.markdown("</div>",unsafe_allow_html=True)
-        st.markdown(f'<div style="border-top:1px solid {BORDER}"></div>',unsafe_allow_html=True)
+                icon  = sentiment_icon(top["sentiment"])
+                top_txt = (f'<div style="margin-top:8px;padding-top:8px;'
+                           f'border-top:1px solid {BORDER};font-size:11px;'
+                           f'color:{sent_color(top["sentiment"])};line-height:1.4">'
+                           f'{icon} {top["headline"][:70]}{"…" if len(top["headline"])>70 else ""}'
+                           f'</div>')
+            with col:
+                st.markdown(
+                    f'<div style="background:{CARD_BG};border:1px solid {BORDER};'
+                    f'border-left:4px solid {rag_c};border-radius:10px;'
+                    f'padding:14px;margin-bottom:10px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+                    f'<div>'
+                    f'<div style="font-size:22px;line-height:1">{ent["flag"]}</div>'
+                    f'<div style="font-weight:700;color:{TEXT};font-size:14px;margin-top:6px">'
+                    f'{ent["short"]}</div>'
+                    f'<div style="color:{MUTED};font-size:11px;margin-top:2px">{ent["sector"]}</div>'
+                    f'<div style="color:{MUTED};font-size:11px">{ent["country"]}</div>'
+                    f'<div style="color:{r_c};font-size:12px;font-weight:700;margin-top:4px">'
+                    f'{ent["rating"]}</div>'
+                    f'</div>'
+                    f'<div style="text-align:right">'
+                    f'<div style="font-size:28px;font-weight:900;color:{rag_c};line-height:1">'
+                    f'{sc["composite"]:.0f}</div>'
+                    f'<div style="font-size:11px;color:{rag_c};font-weight:700">{sc["rag"]}</div>'
+                    f'<div style="font-size:11px;color:{MUTED};margin-top:4px">'
+                    f'£{ent["ead_m"]:.0f}M EAD</div>'
+                    f'<div style="font-size:11px;color:{MUTED}">ECL £{sc["ecl_m"]:.1f}M</div>'
+                    f'</div></div>'
+                    f'{top_txt}</div>',
+                    unsafe_allow_html=True)
+                if st.button(f"View {ent['short']} →", key=f"pf_{eid}",
+                             use_container_width=True):
+                    _navigate_to("entity", eid)
 
 # ─── PAGE: FULL NETWORK ───────────────────────────────────────────────────────
 
@@ -1315,205 +1531,438 @@ def page_entity(cp_id: str):
 
     st.divider()
 
-    # ── Network ────────────────────────────────────────────────────────────────
-    st.markdown("### 🕸️ Network")
+    # ── Build node map before columns (shared by both columns) ─────────────────
     net   = NETWORKS.get(cp_id, {})
     nodes = net.get("nodes", [])
-    type_counts: dict = {}
-    for n in nodes:
-        type_counts[n["type"]] = type_counts.get(n["type"],0)+1
-    stat_cols = st.columns(min(len(type_counts)+1, 10))
-    stat_cols[0].metric("Network nodes", len(nodes)+1)
-    for i,(t,cnt) in enumerate(list(type_counts.items())[:9]):
-        stat_cols[i+1].markdown(
-            f'<div style="text-align:center">'
-            f'<div style="font-size:18px;font-weight:700;color:{MUTED}">{cnt}</div>'
-            f'<div style="font-size:11px;color:{MUTED}">{t.title()}</div></div>',
-            unsafe_allow_html=True)
-
-    G_ego = _build_ego_graph(cp_id)
-    fig   = _graph_to_fig(G_ego, height=560)
-
-    # Clickable nodes — on_select supported in Streamlit ≥1.33
-    try:
-        event = st.plotly_chart(fig, use_container_width=True,
-                                on_select="rerun", key=f"ego_{cp_id}",
-                                selection_mode=["points"])
-        clicked_id = None
-        if event and hasattr(event, "selection") and event.selection:
-            pts = event.selection.get("points", [])
-            if pts:
-                clicked_id = pts[0].get("customdata")
-        if clicked_id:
-            if clicked_id in ENTITIES and clicked_id != cp_id:
-                st.success(f"Clicked: {ENTITIES[clicked_id]['name']} — loading deep dive…")
-                _navigate_to("entity", clicked_id)
-            else:
-                st.session_state[f"inspect_{cp_id}"] = clicked_id
-    except Exception:
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Node inspector (populated from click or dropdown)
-    node_map = {n["id"]: n for n in nodes}
-    for nid in [e[0] for e in net.get("edges",[])] + [e[1] for e in net.get("edges",[])]:
+    node_map: dict = {n["id"]: n for n in nodes}
+    for nid in ([e[0] for e in net.get("edges",[])] +
+                [e[1] for e in net.get("edges",[])]):
         if nid in ENTITIES and nid not in node_map:
             e2 = ENTITIES[nid]
-            node_map[nid] = {"id":nid,"name":e2["name"],"type":"CP",
-                              "country":e2["country"],"note":e2["description"][:120]}
-    pre_sel = st.session_state.get(f"inspect_{cp_id}", "— select —")
-    sel_opts = ["— select —"] + sorted(node_map.keys(), key=lambda x: node_map[x]["name"])
-    sel = st.selectbox("Inspect node", options=sel_opts,
-                       format_func=lambda x: node_map[x]["name"] if x in node_map else x,
-                       index=sel_opts.index(pre_sel) if pre_sel in sel_opts else 0,
-                       key=f"node_sel_{cp_id}")
-    if sel and sel != "— select —" and sel in node_map:
-        nd   = node_map[sel]
-        nrs  = NODE_RISK_SCORES.get(sel, COUNTRY_SCORES.get(sel, {}))
-        rag2 = nrs.get("rag",""); rc2 = RAG_COL.get(rag2, MUTED)
-        score2 = nrs.get("score","—")
-        flag2  = nd.get("flag","")
-        st.markdown(
-            f'<div style="background:{CARD_BG};border:1px solid {BORDER};border-left:4px solid {rc2};'
-            f'border-radius:8px;padding:12px 16px;margin-top:8px;display:flex;justify-content:space-between">'
-            f'<div><div style="font-weight:700;color:{TEXT};font-size:15px">{flag2} {nd["name"]}</div>'
-            f'<div style="color:{MUTED};font-size:12px;margin-top:2px">{nd["type"]} · {nd.get("country","")}</div>'
-            f'<div style="color:{MUTED};font-size:12px;margin-top:6px;line-height:1.5">{nd.get("note","")}</div>'
-            f'</div>'
-            f'<div style="text-align:right;flex-shrink:0;padding-left:16px">'
-            f'<div style="font-size:22px;font-weight:800;color:{rc2}">{score2}</div>'
-            f'<div style="font-size:11px;color:{rc2};font-weight:600">{rag2}</div>'
-            f'</div></div>',
-            unsafe_allow_html=True)
-        if nd["type"] == "CP" and sel in ENTITIES:
-            if st.button(f"Open {ENTITIES[sel]['short']} →", key=f"goto_{sel}_{cp_id}"):
-                _navigate_to("entity", sel)
+            node_map[nid] = {"id": nid, "name": e2["name"], "type": "CP",
+                             "country": e2["country"], "note": e2["description"][:120]}
 
-    with st.expander("All network entities", expanded=False):
-        for t_type in ["SUBSIDIARY","SUPPLIER","CUSTOMER","SHAREHOLDER",
-                       "LENDER","COMPETITOR","REGULATOR","COUNTRY"]:
-            t_nodes = [n for n in nodes if n["type"]==t_type]
-            if not t_nodes: continue
-            st.markdown(f'<div style="color:{MUTED};font-weight:700;margin-top:10px;margin-bottom:4px">{t_type.title()}s</div>', unsafe_allow_html=True)
-            for n in t_nodes:
-                flag3=n.get("flag",""); note3=n.get("note","") or ""
+    # ── Two-column layout: Network left | Signals+Scenarios right ─────────────
+    net_col, info_col = st.columns([3, 2], gap="large")
+
+    # ── LEFT: Network ──────────────────────────────────────────────────────────
+    with net_col:
+        st.markdown("### 🕸️ Network")
+
+        # Compact node-type stats
+        type_counts: dict = {}
+        for n in nodes:
+            type_counts[n["type"]] = type_counts.get(n["type"], 0) + 1
+        stat_cols = st.columns(min(len(type_counts) + 1, 8))
+        stat_cols[0].metric("Nodes", len(nodes) + 1)
+        for i, (t, cnt) in enumerate(list(type_counts.items())[:7]):
+            stat_cols[i+1].markdown(
+                f'<div style="text-align:center">'
+                f'<div style="font-size:16px;font-weight:700;color:{MUTED}">{cnt}</div>'
+                f'<div style="font-size:10px;color:{MUTED}">{t.title()}</div></div>',
+                unsafe_allow_html=True)
+
+        # Network graph
+        G_ego = _build_ego_graph(cp_id)
+        fig   = _graph_to_fig(G_ego, height=480)
+        try:
+            event = st.plotly_chart(fig, use_container_width=True,
+                                    on_select="rerun", key=f"ego_{cp_id}",
+                                    selection_mode=["points"])
+            if event and hasattr(event, "selection") and event.selection:
+                pts = event.selection.get("points", [])
+                if pts:
+                    clicked_id = pts[0].get("customdata")
+                    if clicked_id and clicked_id in ENTITIES and clicked_id != cp_id:
+                        _navigate_to("entity", clicked_id)
+                    elif clicked_id:
+                        st.session_state[f"node_sel_{cp_id}"] = clicked_id
+        except Exception:
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Node inspector dropdown
+        sel_opts = ["— select node —"] + sorted(node_map.keys(),
+                                                key=lambda x: node_map[x]["name"])
+        pre = st.session_state.get(f"node_sel_{cp_id}", "— select node —")
+        sel = st.selectbox(
+            "Inspect network entity", options=sel_opts,
+            format_func=lambda x: node_map[x]["name"] if x in node_map else x,
+            index=sel_opts.index(pre) if pre in sel_opts else 0,
+            key=f"node_sel_{cp_id}")
+
+        # Node card
+        if sel and sel != "— select node —" and sel in node_map:
+            nd    = node_map[sel]
+            nrs   = NODE_RISK_SCORES.get(sel, COUNTRY_SCORES.get(sel, {}))
+            rag2  = nrs.get("rag", ""); rc2 = RAG_COL.get(rag2, MUTED)
+            score2 = nrs.get("score", "—")
+            flag2  = nd.get("flag", "")
+            st.markdown(
+                f'<div style="background:{CARD_BG};border:1px solid {BORDER};'
+                f'border-left:4px solid {rc2};border-radius:8px;padding:12px 16px;'
+                f'margin-top:6px;display:flex;justify-content:space-between">'
+                f'<div style="flex:1">'
+                f'<div style="font-weight:700;color:{TEXT};font-size:14px">{flag2} {nd["name"]}</div>'
+                f'<div style="color:{MUTED};font-size:11px;margin-top:2px">'
+                f'{nd["type"]} · {nd.get("country","")}</div>'
+                f'<div style="color:{MUTED};font-size:11px;margin-top:6px;line-height:1.5">'
+                f'{nd.get("note","")}</div></div>'
+                f'<div style="text-align:right;flex-shrink:0;padding-left:12px">'
+                f'<div style="font-size:20px;font-weight:800;color:{rc2}">{score2}</div>'
+                f'<div style="font-size:11px;color:{rc2};font-weight:600">{rag2}</div>'
+                f'</div></div>', unsafe_allow_html=True)
+            if nd["type"] == "CP" and sel in ENTITIES:
+                if st.button(f"Open {ENTITIES[sel]['short']} →",
+                             key=f"goto_{sel}_{cp_id}"):
+                    _navigate_to("entity", sel)
+
+        with st.expander("All network entities", expanded=False):
+            for t_type in ["SUBSIDIARY","SUPPLIER","CUSTOMER","SHAREHOLDER",
+                           "LENDER","COMPETITOR","REGULATOR","COUNTRY"]:
+                t_nodes = [n for n in nodes if n["type"] == t_type]
+                if not t_nodes: continue
                 st.markdown(
-                    f'<div style="padding:4px 0;border-bottom:1px solid {BORDER}">'
-                    f'<span style="font-weight:600;color:{TEXT}">{flag3} {n["name"]}</span>'
-                    f' <span style="color:{MUTED};font-size:11px">· {n.get("country","")}</span><br>'
-                    f'<span style="color:{MUTED};font-size:11px">{note3}</span></div>',
+                    f'<div style="color:{MUTED};font-weight:700;margin-top:8px;'
+                    f'margin-bottom:4px">{t_type.title()}s</div>',
+                    unsafe_allow_html=True)
+                for n in t_nodes:
+                    flag3 = n.get("flag",""); note3 = n.get("note","") or ""
+                    st.markdown(
+                        f'<div style="padding:3px 0;border-bottom:1px solid {BORDER}">'
+                        f'<span style="font-weight:600;color:{TEXT};font-size:12px">'
+                        f'{flag3} {n["name"]}</span>'
+                        f'<span style="color:{MUTED};font-size:11px"> · {n.get("country","")}</span><br>'
+                        f'<span style="color:{MUTED};font-size:11px">{note3}</span></div>',
+                        unsafe_allow_html=True)
+
+    # ── RIGHT: Signals + Scenarios (node-aware) ────────────────────────────────
+    with info_col:
+        # Determine which entity's data to show
+        sel_node = st.session_state.get(f"node_sel_{cp_id}", "— select node —")
+        if sel_node and sel_node != "— select node —":
+            # Show signals about the selected network entity
+            node_sigs = ([s for s in SIGNALS if s.get("related_entity") == sel_node]
+                         + (signals_for_entity(sel_node)
+                            if sel_node in ENTITIES else []))
+            node_sigs = sorted(node_sigs, key=lambda x: -x["score"])
+            node_scens = SCENARIOS.get(sel_node, [])
+            nd_name    = node_map.get(sel_node, {}).get("name", sel_node)
+            show_label = nd_name
+        else:
+            node_sigs  = sigs
+            node_scens = SCENARIOS.get(cp_id, [])
+            show_label = ent["short"]
+
+        # Signals header + CSV download
+        direct_ct  = sum(1 for s in node_sigs if s.get("direct", True))
+        network_ct = len(node_sigs) - direct_ct
+        sig_hdr, sig_dl = st.columns([4, 1])
+        sig_hdr.markdown(
+            f"### 📡 Signals"
+            f"<div style='font-size:11px;color:{MUTED};margin-top:2px'>"
+            f"{show_label} · {direct_ct} direct · {network_ct} network</div>",
+            unsafe_allow_html=True)
+
+        if node_sigs:
+            import csv, io as _io
+            buf = _io.StringIO()
+            flds = ["scope","entity_id","headline","category","sentiment",
+                    "severity","score","source","observed_at","detail"]
+            cw = csv.DictWriter(buf, fieldnames=flds, extrasaction="ignore")
+            cw.writeheader()
+            for s in node_sigs:
+                cw.writerow({
+                    "scope":       "DIRECT" if s.get("direct", True) else "NETWORK",
+                    "entity_id":   s.get("entity_id",""),
+                    "headline":    s.get("headline",""),
+                    "category":    s.get("category",""),
+                    "sentiment":   s.get("sentiment",""),
+                    "severity":    s.get("severity",""),
+                    "score":       s.get("score",""),
+                    "source":      s.get("source",""),
+                    "observed_at": s.get("observed_at",""),
+                    "detail":      s.get("detail",""),
+                })
+            sig_dl.download_button(
+                "⬇ CSV", data=buf.getvalue(),
+                file_name=f"signals_{sel_node or cp_id}.csv",
+                mime="text/csv", use_container_width=True)
+
+        if not node_sigs:
+            st.info(f"No signals for {show_label}.")
+        else:
+            for sig in node_sigs[:7]:
+                _signal_card(sig, propagated=not sig.get("direct", True))
+            if len(node_sigs) > 7:
+                with st.expander(f"All {len(node_sigs)} signals"):
+                    for sig in node_sigs[7:]:
+                        _signal_card(sig, propagated=not sig.get("direct", True))
+
+        st.markdown(f'<div style="border-bottom:1px solid {BORDER};margin:12px 0 10px"></div>',
                     unsafe_allow_html=True)
 
-    st.divider()
+        # Scenarios
+        st.markdown("### ⚡ Scenarios")
+        if not node_scens:
+            st.info(f"No scenarios for {show_label}.")
+        else:
+            worse   = [s for s in node_scens if s["dir"] == "worse"]
+            better  = [s for s in node_scens if s["dir"] == "better"]
+            neutral = [s for s in node_scens if s["dir"] == "neutral"]
+            scen_eid = sel_node if sel_node and sel_node != "— select node —" else cp_id
+            if worse:
+                st.markdown(f'<div style="color:#ef4444;font-weight:700;font-size:12px;'
+                            f'margin-bottom:4px">⬇ ADVERSE</div>', unsafe_allow_html=True)
+                for s in worse:   _scen_card(scen_eid, s, "#ef4444", "#ef4444")
+            if better:
+                st.markdown(f'<div style="color:#22c55e;font-weight:700;font-size:12px;'
+                            f'margin:8px 0 4px">⬆ UPSIDE</div>', unsafe_allow_html=True)
+                for s in better:  _scen_card(scen_eid, s, "#22c55e", "#22c55e")
+            if neutral:
+                st.markdown(f'<div style="color:{MUTED};font-weight:700;font-size:12px;'
+                            f'margin:8px 0 4px">↔ WATCH</div>', unsafe_allow_html=True)
+                for s in neutral: _scen_card(scen_eid, s, MUTED, MUTED)
 
-    # ── Key Signals ────────────────────────────────────────────────────────────
-    direct_sigs  = [s for s in sigs if s.get("direct",True)]
-    related_sigs = [s for s in sigs if not s.get("direct",True)]
-    top_sigs     = sorted(sigs, key=lambda x: -x["score"])[:8]
+# ─── AGENTS PAGE ─────────────────────────────────────────────────────────────
 
-    sig_hdr, sig_dl = st.columns([5, 1])
-    sig_hdr.markdown(
-        f"### 📡 Key Signals  "
-        f"<span style='font-size:13px;color:{MUTED};font-weight:400'>"
-        f"({len(direct_sigs)} direct · {len(related_sigs)} network)</span>",
+def page_agents():
+    import random, datetime
+
+    st.markdown(
+        f'<h2 style="color:{TEXT};margin:0 0 4px">🤖 AI Monitoring Agents</h2>'
+        f'<div style="color:{MUTED};font-size:13px;margin-bottom:20px">'
+        f'Autonomous agents scanning news, filings, CDS markets and alt-data sources 24/7. '
+        f'Each agent monitors a specific sector or country and feeds signals into the risk engine.</div>',
         unsafe_allow_html=True)
 
-    # CSV export
-    if sigs:
-        import csv, io
-        buf = io.StringIO()
-        fieldnames = ["scope","entity_id","headline","category","sentiment",
-                      "severity","score","source","observed_at","detail"]
-        w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
-        w.writeheader()
-        for s in sigs:
-            w.writerow({
-                "scope":       "DIRECT" if s.get("direct", True) else "NETWORK",
-                "entity_id":   s.get("entity_id",""),
-                "headline":    s.get("headline",""),
-                "category":    s.get("category",""),
-                "sentiment":   s.get("sentiment",""),
-                "severity":    s.get("severity",""),
-                "score":       s.get("score",""),
-                "source":      s.get("source",""),
-                "observed_at": s.get("observed_at",""),
-                "detail":      s.get("detail",""),
-            })
-        sig_dl.download_button(
-            "⬇ CSV", data=buf.getvalue(),
-            file_name=f"signals_{cp_id}_{ent['short'].replace(' ','_')}.csv",
-            mime="text/csv", use_container_width=True)
+    # ── derive sector/country counts from ENTITIES ─────────────────────────────
+    from collections import defaultdict
+    sector_cps: dict = defaultdict(list)
+    country_cps: dict = defaultdict(list)
+    for cp_id, e in ENTITIES.items():
+        sector_cps[e["sector"]].append(cp_id)
+        country_cps[e["country"]].append(cp_id)
 
-    if not sigs:
-        st.info("No signals found.")
-    else:
-        for sig in top_sigs:
-            _signal_card(sig, propagated=not sig.get("direct",True))
-        if len(sigs) > 8:
-            with st.expander(f"All {len(sigs)} signals", expanded=False):
-                for sig in sigs[8:]:
-                    _signal_card(sig, propagated=not sig.get("direct",True))
+    # signal counts per sector / country
+    sig_by_sector: dict = defaultdict(int)
+    sig_by_country: dict = defaultdict(int)
+    for sig in SIGNALS:
+        eid = sig.get("entity_id","")
+        if eid in ENTITIES:
+            sig_by_sector[ENTITIES[eid]["sector"]] += 1
+            sig_by_country[ENTITIES[eid]["country"]] += 1
 
-    st.divider()
+    # deterministic "last scan" offsets so they don't change on every rerun
+    def _last_scan(seed: str, max_mins: int = 45) -> str:
+        r = random.Random(seed)
+        mins = r.randint(1, max_mins)
+        t = datetime.datetime.utcnow() - datetime.timedelta(minutes=mins)
+        return t.strftime("%H:%M UTC")
 
-    # ── Scenarios ─────────────────────────────────────────────────────────────
-    scens = SCENARIOS.get(cp_id, [])
-    st.markdown("### ⚡ Scenarios")
-    if not scens:
-        st.info("No scenarios defined.")
-    else:
-        worse   = [s for s in scens if s["dir"]=="worse"]
-        better  = [s for s in scens if s["dir"]=="better"]
-        neutral = [s for s in scens if s["dir"]=="neutral"]
-        if worse:
-            st.markdown("#### ⬇️ Adverse")
-            for s in worse:    _scen_card(cp_id, s, "#ef4444", "#ef4444")
-        if better:
-            st.markdown("#### ⬆️ Upside")
-            for s in better:   _scen_card(cp_id, s, "#22c55e", "#22c55e")
-        if neutral:
-            st.markdown("#### ↔️ Watch")
-            for s in neutral:  _scen_card(cp_id, s, MUTED, MUTED)
+    def _next_scan(seed: str) -> str:
+        r = random.Random(seed + "_next")
+        mins = r.randint(5, 30)
+        t = datetime.datetime.utcnow() + datetime.timedelta(minutes=mins)
+        return t.strftime("%H:%M UTC")
 
-# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+    def _agent_card(icon: str, name: str, description: str,
+                    n_entities: int, n_signals: int, seed: str,
+                    status: str = "ACTIVE", alert: bool = False):
+        border_col = "#ef4444" if alert else "#3b82f6"
+        status_col = {"ACTIVE": "#22c55e", "SCANNING": "#f59e0b", "IDLE": "#94a3b8"}.get(status, "#22c55e")
+        status_dot = {"ACTIVE": "🟢", "SCANNING": "🟡", "IDLE": "⚫"}.get(status, "🟢")
+        last = _last_scan(seed)
+        nxt  = _next_scan(seed)
+        st.markdown(f"""
+<div style="background:{CARD_BG};border:1px solid {border_col};border-radius:8px;
+            padding:14px 16px;margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:{TEXT}">{icon} {name}</div>
+      <div style="font-size:11px;color:{MUTED};margin-top:2px">{description}</div>
+    </div>
+    <div style="text-align:right;flex-shrink:0;margin-left:12px">
+      <div style="font-size:11px;font-weight:700;color:{status_col}">{status_dot} {status}</div>
+      <div style="font-size:10px;color:{MUTED}">Last: {last}</div>
+      <div style="font-size:10px;color:{MUTED}">Next: {nxt}</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:20px;margin-top:10px;border-top:1px solid {BORDER};padding-top:10px">
+    <div><span style="font-size:18px;font-weight:800;color:{TEXT}">{n_entities}</span>
+         <span style="font-size:10px;color:{MUTED};margin-left:4px">entities</span></div>
+    <div><span style="font-size:18px;font-weight:800;color:#f59e0b">{n_signals}</span>
+         <span style="font-size:10px;color:{MUTED};margin-left:4px">signals</span></div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
-# ─── SIDEBAR (entity pages only — CP switcher) ────────────────────────────────
+    # ── Platform Agents ────────────────────────────────────────────────────────
+    st.markdown(f'<div style="font-size:11px;letter-spacing:1px;color:{MUTED};'
+                f'margin:0 0 10px">PLATFORM AGENTS</div>', unsafe_allow_html=True)
+
+    platform_agents = [
+        ("🌐", "News NLP Agent",      "Real-time news ingestion — Reuters, Bloomberg, FT, WSJ, Le Monde, Handelsblatt",  len(ENTITIES), len(SIGNALS), "news_nlp",    "ACTIVE", True),
+        ("📈", "CDS Monitor",         "Sovereign and corporate CDS spread monitoring across 100+ reference entities",     len(ENTITIES), int(len(SIGNALS)*0.4), "cds_mon",  "ACTIVE", False),
+        ("📄", "Filings Scraper",     "SEC/EDGAR, Bundesanzeiger, AMF, Companies House — earnings, 8-K, profit warnings",len(ENTITIES), int(len(SIGNALS)*0.25), "filings", "ACTIVE", False),
+        ("🛰️", "Alt-Data Agent",     "Satellite imagery, shipping AIS, job postings, web traffic, app downloads",        len(ENTITIES), int(len(SIGNALS)*0.15), "altdata",  "SCANNING", False),
+        ("⚖️", "Regulatory Watch",   "ECB, FCA, BaFin, AMF supervisory actions, enforcement, fines, capital requirements",len(ENTITIES), int(len(SIGNALS)*0.1), "reg_watch","ACTIVE", False),
+        ("🔗", "Supply Chain Radar",  "Tier-1/2 supplier disruption, port congestion, logistics stress, factory shutdowns",len(ENTITIES), int(len(SIGNALS)*0.12), "sc_radar", "ACTIVE", False),
+    ]
+    pcols = st.columns(2)
+    for i, (icon, name, desc, ne, ns, seed, status, alert) in enumerate(platform_agents):
+        with pcols[i % 2]:
+            _agent_card(icon, name, desc, ne, ns, seed, status, alert)
+
+    # ── Sector Agents ──────────────────────────────────────────────────────────
+    st.markdown(f'<div style="border-top:1px solid {BORDER};margin:16px 0 14px"></div>',
+                unsafe_allow_html=True)
+    st.markdown(f'<div style="font-size:11px;letter-spacing:1px;color:{MUTED};'
+                f'margin-bottom:10px">SECTOR AGENTS — {len(sector_cps)} sectors covered</div>',
+                unsafe_allow_html=True)
+
+    SECTOR_ICONS = {
+        "Auto OEM": "🚗", "Auto Supply": "⚙️", "Airlines": "✈️",
+        "Aerospace & Defense": "🛩️", "Energy": "⛽", "Renewables": "🌱",
+        "Utilities": "💡", "Telecom": "📶", "Technology": "💻",
+        "Pharma": "💊", "FMCG": "🛒", "Retail": "🏪",
+        "Chemicals": "🧪", "Industrials": "🏭", "Mining": "⛏️",
+        "Real Estate": "🏢", "Infrastructure": "🏗️", "Shipping": "🚢",
+        "Media": "📺", "Construction Materials": "🧱", "Healthcare": "🏥",
+    }
+
+    sorted_sectors = sorted(sector_cps.keys(), key=lambda s: -sig_by_sector.get(s, 0))
+    scols = st.columns(3)
+    for i, sector in enumerate(sorted_sectors):
+        cps_in_sector = sector_cps[sector]
+        n_sigs = sig_by_sector.get(sector, 0)
+        icon = SECTOR_ICONS.get(sector, "📊")
+        alert = n_sigs >= 4
+        with scols[i % 3]:
+            _agent_card(icon, f"{sector} Agent",
+                        f"Monitoring {', '.join(ENTITIES[c]['short'] for c in cps_in_sector[:3])}"
+                        + (f" +{len(cps_in_sector)-3} more" if len(cps_in_sector) > 3 else ""),
+                        len(cps_in_sector), n_sigs, f"sector_{sector}", "ACTIVE", alert)
+
+    # ── Country Agents ─────────────────────────────────────────────────────────
+    st.markdown(f'<div style="border-top:1px solid {BORDER};margin:16px 0 14px"></div>',
+                unsafe_allow_html=True)
+    st.markdown(f'<div style="font-size:11px;letter-spacing:1px;color:{MUTED};'
+                f'margin-bottom:10px">COUNTRY AGENTS — {len(country_cps)} countries covered</div>',
+                unsafe_allow_html=True)
+
+    # build flag map
+    flag_map: dict = {}
+    for e in ENTITIES.values():
+        flag_map[e["country"]] = e.get("flag", "🌍")
+
+    sorted_countries = sorted(country_cps.keys(), key=lambda c: -sig_by_country.get(c, 0))
+    ccols = st.columns(3)
+    for i, country in enumerate(sorted_countries):
+        cps_in_country = country_cps[country]
+        n_sigs = sig_by_country.get(country, 0)
+        flag   = flag_map.get(country, "🌍")
+        alert  = n_sigs >= 3
+        with ccols[i % 3]:
+            _agent_card(flag, f"{country} Agent",
+                        f"{len(cps_in_country)} counterpart{'y' if len(cps_in_country)==1 else 'ies'} — "
+                        + ", ".join(ENTITIES[c]["short"] for c in cps_in_country[:3])
+                        + (f" +{len(cps_in_country)-3} more" if len(cps_in_country) > 3 else ""),
+                        len(cps_in_country), n_sigs, f"country_{country}", "ACTIVE", alert)
+
+
+# ─── SIDEBAR (hidden — nav is via top bar) ───────────────────────────────────
 
 def sidebar():
-    page = st.session_state.get("page","home")
-
-    if page == "home":
-        # Hide sidebar entirely on landing page
-        st.markdown("""<style>
-            [data-testid="stSidebar"]{display:none}
-            [data-testid="collapsedControl"]{display:none}
-        </style>""", unsafe_allow_html=True)
-        return
+    page   = st.session_state.get("page", "home")
+    cp_id  = st.session_state.get("selected_cp")
 
     with st.sidebar:
+        # ── Logo ──────────────────────────────────────────────────────────────
         st.markdown(
-            f'<div style="padding:12px 0 10px;border-bottom:1px solid {BORDER};margin-bottom:12px">'
-            f'<div style="font-size:16px;font-weight:800;color:{TEXT}">🏦 Risk <span style="color:#3b82f6">OS</span></div>'
-            f'<div style="font-size:10px;color:{MUTED}">AI Risk Intelligence</div></div>',
+            f'<div style="padding:14px 0 12px;border-bottom:1px solid {BORDER};margin-bottom:14px">'
+            f'<div style="font-size:18px;font-weight:900;color:{TEXT}">'
+            f'🏦 Risk <span style="color:#3b82f6">OS</span></div>'
+            f'<div style="font-size:10px;color:{MUTED}">AI Risk Intelligence Platform</div>'
+            f'</div>', unsafe_allow_html=True)
+
+        # ── Navigation ────────────────────────────────────────────────────────
+        st.markdown(
+            f'<div style="font-size:10px;letter-spacing:1px;color:{MUTED};margin-bottom:6px">'
+            f'NAVIGATION</div>', unsafe_allow_html=True)
+
+        NAV = [
+            ("home",      "📊", "Executive Dashboard"),
+            ("portfolio", "🕸️", "Network Explorer"),
+            ("network",   "🔍", "Full Network View"),
+            ("sources",   "📡", "Signal Feed"),
+            ("agents",    "🤖", "AI Agents"),
+        ]
+        for target, icon, label in NAV:
+            active = (page == target) or (page == "entity" and target == "portfolio")
+            if active:
+                st.markdown(
+                    f'<div style="background:#1e3a5f;border:1px solid #3b82f6;border-radius:6px;'
+                    f'padding:8px 10px;margin-bottom:4px">'
+                    f'<span style="color:#60a5fa;font-size:13px;font-weight:600">{icon} {label}</span>'
+                    f'</div>', unsafe_allow_html=True)
+            else:
+                if st.button(f"{icon} {label}", key=f"sb_{target}",
+                             use_container_width=True):
+                    _navigate_to(target)
+
+        # ── Quick stats ───────────────────────────────────────────────────────
+        st.markdown(
+            f'<div style="border-top:1px solid {BORDER};margin:14px 0 10px"></div>',
             unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="font-size:10px;letter-spacing:1px;color:{MUTED};margin-bottom:8px">'
+            f'QUICK STATS</div>', unsafe_allow_html=True)
 
-        st.markdown(f'<div style="color:{MUTED};font-size:10px;letter-spacing:1px;padding:4px 0 6px">JUMP TO COUNTERPARTY</div>', unsafe_allow_html=True)
+        n_red   = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "RED")
+        n_amber = sum(1 for cp in ENTITIES if SCORES[cp]["rag"] == "AMBER")
+        total_ead = sum(e["ead_m"] for e in ENTITIES.values())
 
-        sorted_cps = sorted(ENTITIES.keys(), key=lambda cp: -SCORES[cp]["composite"])
-        cp_options = ["— select —"] + sorted_cps
-        current    = st.session_state.get("selected_cp")
-        idx        = cp_options.index(current) if current in cp_options else 0
+        for dot, label, val in [
+            ("🔴", "Critical",   str(n_red)),
+            ("🟡", "High",       str(n_amber)),
+            ("🏛️", "Total EAD", f"£{total_ead/1000:.1f}bn"),
+            ("📡", "Signals",    str(len(SIGNALS))),
+        ]:
+            st.markdown(
+                f'<div style="display:flex;justify-content:space-between;'
+                f'padding:4px 0;border-bottom:1px solid {BORDER}">'
+                f'<span style="color:{MUTED};font-size:12px">{dot} {label}</span>'
+                f'<span style="color:{TEXT};font-weight:700;font-size:12px">{val}</span>'
+                f'</div>', unsafe_allow_html=True)
 
-        def _fmt_cp(cp_id):
-            if cp_id == "— select —": return cp_id
-            ent = ENTITIES[cp_id]; sc = SCORES[cp_id]
-            dot = {"RED":"🔴","AMBER":"🟡","GREEN":"🟢"}.get(sc["rag"],"⚪")
-            return f"{dot} {ent['flag']} {ent['short']}  ({sc['composite']:.0f})"
+        # ── CP selector (entity pages only) ───────────────────────────────────
+        if page == "entity":
+            st.markdown(
+                f'<div style="border-top:1px solid {BORDER};margin:14px 0 8px"></div>',
+                unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="font-size:10px;letter-spacing:1px;color:{MUTED};margin-bottom:6px">'
+                f'JUMP TO COUNTERPARTY</div>', unsafe_allow_html=True)
+            sorted_cps = sorted(ENTITIES.keys(), key=lambda c: -SCORES[c]["composite"])
+            opts = ["— select —"] + sorted_cps
+            current = st.session_state.get("selected_cp")
+            idx = opts.index(current) if current in opts else 0
 
-        sel = st.selectbox("CP", options=cp_options, format_func=_fmt_cp,
-                           index=idx, key="sidebar_cp_select",
-                           label_visibility="collapsed")
-        if sel and sel != "— select —" and sel != current:
-            _navigate_to("entity", sel)
+            def _fmt(c):
+                if c == "— select —": return c
+                e = ENTITIES[c]; s = SCORES[c]
+                dot = {"RED": "🔴", "AMBER": "🟡", "GREEN": "🟢"}.get(s["rag"], "⚪")
+                return f"{dot} {e['flag']} {e['short']} ({s['composite']:.0f})"
+
+            sel = st.selectbox("CP", opts, format_func=_fmt, index=idx,
+                               key="sb_cp_sel", label_visibility="collapsed")
+            if sel and sel != "— select —" and sel != current:
+                _navigate_to("entity", sel)
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        st.markdown(
+            f'<div style="position:absolute;bottom:16px;left:0;right:0;text-align:center;'
+            f'color:{MUTED};font-size:10px">Prototype v0.1 — Not for production use</div>',
+            unsafe_allow_html=True)
 
 
 # ─── TOP NAV BAR (shown on all non-home pages) ────────────────────────────────
@@ -1523,12 +1972,13 @@ def _top_nav():
     cp_id   = st.session_state.get("selected_cp")
     cp_name = ENTITIES[cp_id]["short"] if cp_id and cp_id in ENTITIES else None
 
-    # Breadcrumb label
+    # Breadcrumb
     crumb_parts = ["Home"]
-    if page == "portfolio":                crumb_parts.append("Counterparty")
-    elif page == "network":                crumb_parts.append("Full Network")
-    elif page == "sources":                crumb_parts.append("Signal Sources")
-    elif page == "entity" and cp_name:     crumb_parts += ["Counterparty", cp_name]
+    if page == "portfolio":            crumb_parts.append("Counterparty")
+    elif page == "network":            crumb_parts.append("Full Network")
+    elif page == "sources":            crumb_parts.append("Signal Sources")
+    elif page == "agents":             crumb_parts.append("AI Agents")
+    elif page == "entity" and cp_name: crumb_parts += ["Counterparty", cp_name]
 
     sep = " <span style='color:#475569'>›</span> "
     crumb_spans = []
@@ -1536,32 +1986,66 @@ def _top_nav():
         col_c = TEXT if i == len(crumb_parts)-1 else MUTED
         fw    = "600" if i == len(crumb_parts)-1 else "400"
         crumb_spans.append(f'<span style="color:{col_c};font-weight:{fw}">{p}</span>')
-    crumb_html = sep.join(crumb_spans)
     st.markdown(
-        f'<div style="font-size:12px;margin-bottom:4px">{crumb_html}</div>',
+        f'<div style="font-size:12px;margin-bottom:4px">{sep.join(crumb_spans)}</div>',
         unsafe_allow_html=True)
 
-    # Nav buttons row
+    # Nav buttons + CP dropdown in one row
     NAV = [
-        ("🏠 Home",        "home",      "tnb_home"),
-        ("📊 Counterparty","portfolio", "tnb_port"),
-        ("🕸️ Network",     "network",   "tnb_net"),
-        ("📡 Sources",     "sources",   "tnb_src"),
+        ("🏠 Home",        "home",     "tnb_home"),
+        ("📊 Portfolio",   "portfolio","tnb_port"),
+        ("🕸️ Network",    "network",  "tnb_net"),
+        ("📡 Sources",     "sources",  "tnb_src"),
+        ("🤖 Agents",      "agents",   "tnb_agents"),
     ]
-    cols = st.columns([1,1,1,1,4])
-    for col, (label, target, key) in zip(cols, NAV):
+    btn_cols = st.columns([1, 1, 1, 1, 1, 2])
+    for col, (label, target, key) in zip(btn_cols[:5], NAV):
         active = (page == target) or (page == "entity" and target == "portfolio")
         with col:
             if active:
                 st.markdown(
-                    f'<div style="background:{CARD_BG};border:1px solid #3b82f6;border-radius:6px;'
-                    f'padding:5px 0;text-align:center;font-size:12px;font-weight:700;color:#3b82f6">'
-                    f'{label}</div>', unsafe_allow_html=True)
+                    f'<div style="background:{CARD_BG};border:1px solid #3b82f6;'
+                    f'border-radius:6px;padding:5px 0;text-align:center;'
+                    f'font-size:12px;font-weight:700;color:#3b82f6">{label}</div>',
+                    unsafe_allow_html=True)
             else:
                 if st.button(label, key=key, use_container_width=True):
                     _navigate_to(target)
-    st.markdown(f'<div style="border-bottom:1px solid {BORDER};margin:8px 0 16px"></div>',
-                unsafe_allow_html=True)
+
+    # Sector + Country quick-filters (right side of nav)
+    with btn_cols[5]:
+        qf1, qf2 = st.columns(2)
+        all_sectors = ["All sectors"] + sorted(set(e["sector"] for e in ENTITIES.values()))
+        seen_c2: dict = {}
+        for _e in ENTITIES.values(): seen_c2[_e["country"]] = _e.get("flag","")
+        all_countries = ["All countries"] + [f'{seen_c2[c]} {c}' for c in sorted(seen_c2)]
+
+        prev_sec = st.session_state.get("topnav_sector", "All sectors")
+        prev_cty = st.session_state.get("topnav_country", "All countries")
+
+        with qf1:
+            new_sec = st.selectbox("Sector", all_sectors,
+                                   index=all_sectors.index(prev_sec) if prev_sec in all_sectors else 0,
+                                   key="topnav_sector", label_visibility="collapsed")
+        with qf2:
+            new_cty = st.selectbox("Country", all_countries,
+                                   index=all_countries.index(prev_cty) if prev_cty in all_countries else 0,
+                                   key="topnav_country", label_visibility="collapsed")
+
+        # Sync top-nav quick filter → portfolio page multiselects + navigate
+        if new_sec != "All sectors" or new_cty != "All countries":
+            if new_sec != "All sectors":
+                st.session_state["pf_sectors"] = [new_sec]
+            if new_cty != "All countries":
+                cty_code = new_cty.split()[-1]
+                # find matching display value in portfolio options
+                st.session_state["pf_countries"] = [new_cty]
+            if st.session_state.get("page") != "portfolio":
+                _navigate_to("portfolio")
+
+    st.markdown(
+        f'<div style="border-bottom:1px solid {BORDER};margin:6px 0 14px"></div>',
+        unsafe_allow_html=True)
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -1570,6 +2054,16 @@ def main():
     if "page" not in st.session_state:        st.session_state.page = "home"
     if "selected_cp" not in st.session_state: st.session_state.selected_cp = None
     if "nav_history" not in st.session_state: st.session_state.nav_history = []
+
+    # Mobile-responsive CSS
+    st.markdown("""<style>
+    @media (max-width: 768px) {
+        section.main > div { padding: 0.5rem !important; }
+        div[data-testid="column"] { min-width: 100% !important; flex: 1 1 100% !important; }
+        h2 { font-size: 1.1rem !important; }
+        div[data-testid="stMetric"] label { font-size: 10px !important; }
+    }
+    </style>""", unsafe_allow_html=True)
 
     sidebar()
     page = st.session_state.page
@@ -1582,6 +2076,7 @@ def main():
     elif page == "portfolio":        page_portfolio()
     elif page == "network":          page_full_network()
     elif page == "sources":          page_sources()
+    elif page == "agents":           page_agents()
     elif page == "entity" and cp and cp in ENTITIES: page_entity(cp)
     else:                            page_home()
 
