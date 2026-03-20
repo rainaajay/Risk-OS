@@ -1553,7 +1553,19 @@ def page_full_network():
     G = _build_full_graph()
     remove = [n for n,d in G.nodes(data=True) if d.get("node_type","") not in sel_types]
     Gf = G.copy(); Gf.remove_nodes_from(remove)
-    st.plotly_chart(_graph_to_fig(Gf,height=700),use_container_width=True)
+    st.caption("Click a counterparty node (blue) to open its deep-dive page.")
+    try:
+        event = st.plotly_chart(_graph_to_fig(Gf, height=700), use_container_width=True,
+                                on_select="rerun", key="full_net_chart",
+                                selection_mode=["points"])
+        if event and hasattr(event, "selection") and event.selection:
+            pts = event.selection.get("points", [])
+            if pts:
+                clicked_id = pts[0].get("customdata")
+                if clicked_id and clicked_id in ENTITIES:
+                    _navigate_to("entity", clicked_id)
+    except Exception:
+        st.plotly_chart(_graph_to_fig(Gf, height=700), use_container_width=True)
 
 # ─── PAGE: ENTITY DEEP DIVE ───────────────────────────────────────────────────
 
@@ -1669,6 +1681,7 @@ def page_entity(cp_id: str):
         # Network graph
         G_ego = _build_ego_graph(cp_id)
         fig   = _graph_to_fig(G_ego, height=480)
+        st.caption("Click any node to inspect it. Click a counterparty (blue) to navigate to its page.")
         try:
             event = st.plotly_chart(fig, use_container_width=True,
                                     on_select="rerun", key=f"ego_{cp_id}",
