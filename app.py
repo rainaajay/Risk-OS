@@ -348,7 +348,7 @@ SCENARIO_LINKED_SIGNALS: dict = {
 }
 
 st.set_page_config(page_title="Risk OS", page_icon="🏦",
-                   layout="wide", initial_sidebar_state="expanded")
+                   layout="wide", initial_sidebar_state="collapsed")
 st.markdown(f"""
 <style>
   html,body,[data-testid="stAppViewContainer"]{{background:{BG};color:{TEXT};}}
@@ -2116,17 +2116,8 @@ def main():
         div[data-testid="column"] { min-width: 100% !important; flex: 1 1 100% !important; }
         h2 { font-size: 1.1rem !important; }
         div[data-testid="stMetric"] label { font-size: 10px !important; }
-        /* Collapse sidebar on mobile so it doesn't overlap main content */
-        section[data-testid="stSidebar"] {
-            width: 0 !important;
-            min-width: 0 !important;
-            transform: translateX(-100%) !important;
-        }
-        section[data-testid="stSidebar"][aria-expanded="true"] {
-            width: 260px !important;
-            transform: translateX(0) !important;
-        }
-        .main .block-container { margin-left: 0 !important; }
+        section[data-testid="stSidebar"] { display: none !important; }
+        .main .block-container { margin-left: 0 !important; padding-left: 0.5rem !important; }
     }
     </style>""", unsafe_allow_html=True)
 
