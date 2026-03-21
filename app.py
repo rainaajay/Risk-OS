@@ -89,9 +89,9 @@ CP_TICKER_MAP: dict[str, str] = {
 }
 
 # ─── RV MODEL (lazy-loaded, cached 24 h) ──────────────────────────────────────
-@st.cache_data(ttl=86400, show_spinner="Fetching market data & training model…")
-def _load_rv_data():
-    """Fetch real data + train/load XGBoost model. Cached 24 h."""
+@st.cache_resource(show_spinner="Fetching market data & training model…")
+def _load_rv_artifacts():
+    """Fetch real data + train/load XGBoost model. Returns dict or None. Cached for lifetime of server."""
     try:
         from data_fetcher import get_data, enrich_with_ecosystem
         from rv_model    import load_or_train, get_dislocation_summary
@@ -100,11 +100,13 @@ def _load_rv_data():
         enr  = enrich_with_ecosystem(raw)
         preds, model, imp, scaler = load_or_train(enr)
         summary = get_dislocation_summary(preds)
-        return summary
-    except Exception as exc:
+        return {"summary": summary, "enriched": enr,
+                "model": model, "imputer": imp, "scaler": scaler}
+    except Exception:
         return None   # graceful degradation if deps not installed yet
 
-RV_DATA: pd.DataFrame | None = _load_rv_data()
+_RV_ARTIFACTS = _load_rv_artifacts()
+RV_DATA: pd.DataFrame | None = _RV_ARTIFACTS["summary"] if _RV_ARTIFACTS else None
 
 # ─── THEME ────────────────────────────────────────────────────────────────────
 BG      = "#0f172a"
@@ -2017,6 +2019,73 @@ def page_agents():
                         + (f" +{len(cps_in_country)-3} more" if len(cps_in_country) > 3 else ""),
                         len(cps_in_country), n_sigs, f"country_{country}", "ACTIVE", alert)
 
+    # ── RV Ecosystem Agents ─────────────────────────────────────────────────────
+    if RV_DATA is not None and "ecosystem" in RV_DATA.columns:
+        st.markdown(f'<div style="border-top:1px solid {BORDER};margin:16px 0 14px"></div>',
+                    unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size:11px;letter-spacing:1px;color:{MUTED};'
+                    f'margin-bottom:10px">RV ECOSYSTEM AGENTS — valuation anomaly monitors</div>',
+                    unsafe_allow_html=True)
+
+        ecosystems_in_rv = sorted(RV_DATA["ecosystem"].dropna().unique())
+        eco_cols_rv = st.columns(3)
+        for i, eco in enumerate(ecosystems_in_rv):
+            eco_sub = RV_DATA[RV_DATA["ecosystem"] == eco]
+            dvals   = pd.to_numeric(eco_sub.get("composite_dislocation", pd.Series()), errors="coerce").dropna()
+            n_firms  = len(eco_sub)
+            n_rich   = int((dvals > 5).sum())
+            n_cheap  = int((dvals < -5).sum())
+            avg_dis  = float(dvals.mean()) if len(dvals) > 0 else 0.0
+            # Status: ALERT if avg > 15 (RICH) or < -15 (CHEAP), SCANNING if anomaly detected
+            alert = abs(avg_dis) > 15
+            status = "ALERT" if alert else ("SCANNING" if abs(avg_dis) > 5 else "ACTIVE")
+            desc  = (f"{n_firms} firms monitored · "
+                     f"{n_rich} RICH · {n_cheap} CHEAP · avg dislocation {avg_dis:+.1f}%")
+            border_col = "#ef4444" if avg_dis > 15 else ("#22c55e" if avg_dis < -15 else "#3b82f6")
+            status_col = {"ALERT": "#ef4444", "SCANNING": "#f59e0b", "ACTIVE": "#22c55e"}.get(status, "#22c55e")
+            status_dot = {"ALERT": "🔴", "SCANNING": "🟡", "ACTIVE": "🟢"}.get(status, "🟢")
+            last = _last_scan(f"rv_eco_{eco}")
+            nxt  = _next_scan(f"rv_eco_{eco}")
+            with eco_cols_rv[i % 3]:
+                st.markdown(f"""
+<div style="background:{CARD_BG};border:1px solid {border_col};border-radius:8px;
+            padding:14px 16px;margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <div style="font-size:14px;font-weight:700;color:{TEXT}">📐 {eco}</div>
+      <div style="font-size:11px;color:{MUTED};margin-top:2px">{desc}</div>
+    </div>
+    <div style="text-align:right;flex-shrink:0;margin-left:10px">
+      <div style="font-size:11px;font-weight:700;color:{status_col}">{status_dot} {status}</div>
+      <div style="font-size:10px;color:{MUTED}">Last: {last}</div>
+      <div style="font-size:10px;color:{MUTED}">Next: {nxt}</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:16px;margin-top:10px;border-top:1px solid {BORDER};padding-top:10px">
+    <div><span style="font-size:16px;font-weight:800;color:{TEXT}">{n_firms}</span>
+         <span style="font-size:10px;color:{MUTED};margin-left:3px">firms</span></div>
+    <div><span style="font-size:16px;font-weight:800;color:#ef4444">{n_rich}</span>
+         <span style="font-size:10px;color:{MUTED};margin-left:3px">RICH</span></div>
+    <div><span style="font-size:16px;font-weight:800;color:#22c55e">{n_cheap}</span>
+         <span style="font-size:10px;color:{MUTED};margin-left:3px">CHEAP</span></div>
+    <div><span style="font-size:16px;font-weight:800;color:{_disloc_color(avg_dis)}">{avg_dis:+.1f}%</span>
+         <span style="font-size:10px;color:{MUTED};margin-left:3px">avg disloc</span></div>
+  </div>
+  <div style="margin-top:8px">
+    <div style="cursor:pointer;font-size:11px;color:#3b82f6;text-decoration:underline"
+         onclick="">→ View ecosystem deep-dive</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        # Summary stat line
+        total_agents = 6 + len(sector_cps) + len(country_cps) + len(ecosystems_in_rv)
+        st.markdown(
+            f'<div style="color:{MUTED};font-size:11px;margin-top:10px">'
+            f'Total active agents: <b style="color:{TEXT}">{total_agents}</b> · '
+            f'Platform: 6 · Sector: {len(sector_cps)} · Country: {len(country_cps)} · '
+            f'RV Ecosystem: {len(ecosystems_in_rv)}</div>',
+            unsafe_allow_html=True)
+
 
 # ─── PAGE: RELATIVE VALUE ─────────────────────────────────────────────────────
 
@@ -2036,6 +2105,327 @@ def _disloc_label(v: float) -> str:
     if v < -20: return "CHEAP"
     if v < -5:  return "Slightly Cheap"
     return "FAIR"
+
+def page_ecosystem():
+    """Ecosystem deep-dive: compare 8 ecosystems head-to-head."""
+    if _RV_ARTIFACTS is None or RV_DATA is None:
+        _rv_unavailable(); return
+
+    enr = _RV_ARTIFACTS["enriched"]
+    rdv = RV_DATA.copy()
+
+    st.markdown(
+        f'<div style="font-size:22px;font-weight:900;color:{TEXT};margin-bottom:4px">'
+        f'🌐 Ecosystem Deep-Dive</div>'
+        f'<div style="color:{MUTED};font-size:12px;margin-bottom:20px">'
+        f'Structural quality and relative-value signals across 8 global ecosystems · '
+        f'{len(enr)} firms · refreshed daily</div>',
+        unsafe_allow_html=True)
+
+    # ── Ecosystem colours (from ecosystems.py, fallback to a palette) ─────────
+    try:
+        from ecosystems import ECOSYSTEM_COLORS
+        eco_colors = ECOSYSTEM_COLORS
+    except Exception:
+        palette = ["#3b82f6","#f97316","#22c55e","#a78bfa","#f43f5e",
+                   "#06b6d4","#eab308","#ec4899"]
+        ecosystems_list = sorted(enr["ecosystem"].dropna().unique())
+        eco_colors = {e: palette[i % len(palette)] for i, e in enumerate(ecosystems_list)}
+
+    ecosystems_list = sorted(enr["ecosystem"].dropna().unique())
+
+    # ── Build ecosystem-level summary ─────────────────────────────────────────
+    QUALITY_METRICS = [
+        ("operatingMargins", "Op. Margin", True),
+        ("fcf_margin",       "FCF Margin", True),
+        ("revenueGrowth",    "Rev. Growth", True),
+        ("returnOnEquity",   "ROE",        True),
+        ("leverage_ratio",   "Leverage",   False),   # lower = better
+        ("currentRatio",     "Curr. Ratio", True),
+    ]
+
+    eco_rows = []
+    for eco in ecosystems_list:
+        sub = enr[enr["ecosystem"] == eco]
+        rv_sub = rdv[rdv["ecosystem"] == eco] if "ecosystem" in rdv.columns else rdv.iloc[0:0]
+        row = {"ecosystem": eco, "n_firms": len(sub)}
+        for col, _, _ in QUALITY_METRICS:
+            vals = pd.to_numeric(sub[col], errors="coerce").dropna() if col in sub.columns else pd.Series()
+            row[col] = float(vals.median()) if len(vals) > 0 else float("nan")
+        # Dislocation from RV_DATA
+        if not rv_sub.empty and "composite_dislocation" in rv_sub.columns:
+            dvals = pd.to_numeric(rv_sub["composite_dislocation"], errors="coerce").dropna()
+            row["avg_dislocation"] = float(dvals.mean()) if len(dvals) > 0 else float("nan")
+            row["pct_cheap"] = float((dvals < -5).sum() / len(dvals) * 100) if len(dvals) > 0 else 0.0
+            row["pct_rich"]  = float((dvals > 5).sum()  / len(dvals) * 100) if len(dvals) > 0 else 0.0
+        else:
+            row["avg_dislocation"] = float("nan")
+            row["pct_cheap"] = row["pct_rich"] = 0.0
+        eco_rows.append(row)
+
+    eco_df = pd.DataFrame(eco_rows)
+
+    # ── Section 1: Valuation signals stacked bar ──────────────────────────────
+    st.markdown(f'<div style="font-size:15px;font-weight:700;color:{TEXT};margin-bottom:8px">'
+                f'Valuation Signals — % of Firms by Signal</div>', unsafe_allow_html=True)
+
+    fig_sig = go.Figure()
+    pct_fair = (100 - eco_df["pct_cheap"] - eco_df["pct_rich"]).clip(lower=0)
+    fig_sig.add_trace(go.Bar(
+        name="CHEAP", x=eco_df["ecosystem"], y=eco_df["pct_cheap"],
+        marker_color="#22c55e", text=[f"{v:.0f}%" for v in eco_df["pct_cheap"]],
+        textposition="inside", textfont=dict(size=10, color="white")))
+    fig_sig.add_trace(go.Bar(
+        name="FAIR",  x=eco_df["ecosystem"], y=pct_fair,
+        marker_color="#475569", text=[f"{v:.0f}%" for v in pct_fair],
+        textposition="inside", textfont=dict(size=10, color="white")))
+    fig_sig.add_trace(go.Bar(
+        name="RICH",  x=eco_df["ecosystem"], y=eco_df["pct_rich"],
+        marker_color="#ef4444", text=[f"{v:.0f}%" for v in eco_df["pct_rich"]],
+        textposition="inside", textfont=dict(size=10, color="white")))
+    fig_sig.update_layout(
+        barmode="stack", height=270,
+        margin=dict(l=0, r=0, t=10, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(color=MUTED, gridcolor=BORDER, tickangle=-15, tickfont=dict(size=10)),
+        yaxis=dict(color=MUTED, gridcolor=BORDER, title="% of firms", range=[0, 100]),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(color=MUTED, size=10)),
+        font=dict(color=MUTED, size=10))
+    st.plotly_chart(fig_sig, use_container_width=True)
+
+    # ── Section 2: Quality heatmap ────────────────────────────────────────────
+    st.divider()
+    st.markdown(f'<div style="font-size:15px;font-weight:700;color:{TEXT};margin-bottom:8px">'
+                f'Structural Quality Matrix</div>', unsafe_allow_html=True)
+    st.caption("Cell = ecosystem median. Green = stronger on that metric. Leverage inverted (lower = greener).")
+
+    metric_cols = [c for c, _, _ in QUALITY_METRICS]
+    metric_lbls = [l for _, l, _ in QUALITY_METRICS]
+    higher_better = {c: hb for c, _, hb in QUALITY_METRICS}
+
+    # Normalise each column 0–1 (min-max across ecosystems)
+    z_matrix = []
+    text_matrix = []
+    for eco in eco_df["ecosystem"]:
+        row_vals = []
+        row_text = []
+        for col in metric_cols:
+            raw = eco_df.loc[eco_df["ecosystem"] == eco, col].values[0]
+            col_vals = pd.to_numeric(eco_df[col], errors="coerce").dropna()
+            mn, mx = col_vals.min(), col_vals.max()
+            if mx > mn:
+                norm = (raw - mn) / (mx - mn)
+            else:
+                norm = 0.5
+            if not higher_better[col]:
+                norm = 1 - norm   # invert leverage
+            row_vals.append(norm)
+            row_text.append(f"{raw:.2f}" if not pd.isna(raw) else "—")
+        z_matrix.append(row_vals)
+        text_matrix.append(row_text)
+
+    fig_heat = go.Figure(go.Heatmap(
+        z=z_matrix,
+        x=metric_lbls,
+        y=list(eco_df["ecosystem"]),
+        text=text_matrix,
+        texttemplate="%{text}",
+        textfont=dict(size=11, color="white"),
+        colorscale=[[0, "#1e293b"], [0.5, "#1d4ed8"], [1, "#22c55e"]],
+        showscale=False,
+        zmin=0, zmax=1,
+    ))
+    fig_heat.update_layout(
+        height=max(220, len(ecosystems_list) * 40),
+        margin=dict(l=0, r=0, t=10, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(color=MUTED, tickfont=dict(size=11), side="top"),
+        yaxis=dict(color=TEXT, tickfont=dict(size=11)),
+        font=dict(color=MUTED, size=10))
+    st.plotly_chart(fig_heat, use_container_width=True)
+
+    # ── Section 3: Avg dislocation bar ────────────────────────────────────────
+    st.divider()
+    st.markdown(f'<div style="font-size:15px;font-weight:700;color:{TEXT};margin-bottom:8px">'
+                f'Average Composite Dislocation by Ecosystem</div>', unsafe_allow_html=True)
+
+    eco_sorted = eco_df.sort_values("avg_dislocation", ascending=False, na_position="last")
+    colors_dis  = [_disloc_color(v) if not pd.isna(v) else MUTED
+                   for v in eco_sorted["avg_dislocation"]]
+    fig_dis = go.Figure(go.Bar(
+        x=eco_sorted["ecosystem"], y=eco_sorted["avg_dislocation"],
+        marker_color=colors_dis, marker_line_color=BG, marker_line_width=1,
+        text=[f"{v:+.2f}" if not pd.isna(v) else "—" for v in eco_sorted["avg_dislocation"]],
+        textposition="outside", textfont=dict(color=TEXT, size=10)))
+    fig_dis.add_hline(y=0, line_color=BORDER, line_width=1)
+    fig_dis.update_layout(
+        height=260, margin=dict(l=0, r=0, t=10, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(color=MUTED, gridcolor=BORDER, tickangle=-15, tickfont=dict(size=10)),
+        yaxis=dict(color=MUTED, gridcolor=BORDER, title="Avg z-score dislocation"),
+        font=dict(color=MUTED, size=10), showlegend=False)
+    st.plotly_chart(fig_dis, use_container_width=True)
+
+    # ── Section 4: Ecosystem selector → top CHEAP + RICH ─────────────────────
+    st.divider()
+    st.markdown(f'<div style="font-size:15px;font-weight:700;color:{TEXT};margin-bottom:8px">'
+                f'Ecosystem Spotlight</div>', unsafe_allow_html=True)
+
+    sel_eco = st.selectbox("Select ecosystem", ecosystems_list, key="eco_spotlight")
+    if sel_eco:
+        eco_firms = rdv[rdv["ecosystem"] == sel_eco].copy() if "ecosystem" in rdv.columns else rdv.copy()
+        if "composite_dislocation" in eco_firms.columns:
+            eco_firms = eco_firms.sort_values("composite_dislocation", ascending=False, na_position="last")
+            top_rich  = eco_firms.head(5)
+            top_cheap = eco_firms.tail(5).iloc[::-1]
+
+            c1, c2 = st.columns(2)
+            def _mini_table(title, color, firms_df):
+                rows = ""
+                for _, r in firms_df.iterrows():
+                    v = r.get("composite_dislocation", float("nan"))
+                    fpe = r.get("forwardPE", float("nan"))
+                    rows += (
+                        f'<tr style="border-bottom:1px solid {BORDER}">'
+                        f'<td style="padding:5px 6px;font-weight:700;color:{TEXT};font-size:12px">'
+                        f'{r.get("ticker","—")}</td>'
+                        f'<td style="padding:5px 6px;text-align:right;color:{color};'
+                        f'font-weight:700;font-size:12px">'
+                        f'{"—" if pd.isna(v) else f"{v:+.1f}%"}</td>'
+                        f'<td style="padding:5px 6px;text-align:right;color:{MUTED};font-size:11px">'
+                        f'PE {"—" if pd.isna(fpe) else f"{fpe:.1f}x"}</td>'
+                        f'</tr>'
+                    )
+                return (f'<div style="font-size:12px;font-weight:700;color:{color};margin-bottom:6px">'
+                        f'{title}</div>'
+                        f'<table style="width:100%;border-collapse:collapse">'
+                        f'<tbody>{rows}</tbody></table>')
+
+            with c1:
+                st.markdown(_mini_table("▲ Most RICH (overvalued)", "#ef4444", top_rich),
+                            unsafe_allow_html=True)
+            with c2:
+                st.markdown(_mini_table("▼ Most CHEAP (undervalued)", "#22c55e", top_cheap),
+                            unsafe_allow_html=True)
+
+        # Key fundamentals for this ecosystem
+        st.markdown(f'<div style="margin-top:16px;font-size:12px;font-weight:700;color:{MUTED}">'
+                    f'AVERAGE FUNDAMENTALS — {sel_eco}</div>', unsafe_allow_html=True)
+        eco_row = eco_df[eco_df["ecosystem"] == sel_eco]
+        if not eco_row.empty:
+            er = eco_row.iloc[0]
+            fund_cols = st.columns(len(QUALITY_METRICS))
+            for col, (feat, lbl, _) in zip(fund_cols, QUALITY_METRICS):
+                val = er.get(feat, float("nan"))
+                with col:
+                    st.metric(lbl, f"{val:.1%}" if (not pd.isna(val) and feat.endswith("Margins")
+                              or feat in ("operatingMargins","profitMargins","grossMargins",
+                                          "revenueGrowth","earningsGrowth","fcf_margin","returnOnEquity",
+                                          "returnOnAssets")) else
+                              (f"{val:.2f}" if not pd.isna(val) else "—"))
+
+    st.divider()
+    st.caption("Data: yfinance · Model: XGBoost · Metrics are ecosystem-level medians across all firms in training universe. Not investment advice.")
+
+
+def _rv_attribution_card(ticker: str):
+    """Feature attribution bar chart + table for a single ticker."""
+    if _RV_ARTIFACTS is None:
+        return
+    try:
+        from rv_model import feature_attribution
+    except ImportError:
+        return
+
+    attr_df = feature_attribution(ticker, _RV_ARTIFACTS["enriched"], _RV_ARTIFACTS["model"])
+    if attr_df.empty:
+        return
+
+    # Firm dislocation for context
+    dv = float("nan")
+    if RV_DATA is not None:
+        row = RV_DATA[RV_DATA["ticker"].str.upper() == ticker.upper()]
+        if not row.empty:
+            dv = row.iloc[0].get("composite_dislocation", float("nan"))
+
+    dlbl = _disloc_label(dv) if not pd.isna(dv) else "?"
+    dc   = _disloc_color(dv) if not pd.isna(dv) else MUTED
+
+    st.markdown(
+        f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin:14px 0 4px">'
+        f'🔬 Feature Attribution — Why is '
+        f'<span style="color:{dc}">{ticker} {dlbl}?</span></div>'
+        f'<div style="color:{MUTED};font-size:11px;margin-bottom:10px">'
+        f'Features where this firm diverges most from its ecosystem peers, '
+        f'weighted by XGBoost model importance. '
+        f'Positive σ = above peer median · Negative σ = below peer median.</div>',
+        unsafe_allow_html=True)
+
+    # Horizontal bar chart
+    colors = ["#ef4444" if x > 0 else "#22c55e" for x in attr_df["z_deviation"]]
+    fig = go.Figure(go.Bar(
+        y=attr_df["display_name"],
+        x=attr_df["z_deviation"],
+        orientation="h",
+        marker_color=colors,
+        marker_line_color=BG, marker_line_width=1,
+        customdata=list(zip(
+            [f"{v:.3g}" if not pd.isna(v) else "—" for v in attr_df["firm_value"]],
+            [f"{v:.3g}" if not pd.isna(v) else "—" for v in attr_df["peer_median"]],
+        )),
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Firm: %{customdata[0]}<br>"
+            "Peer median: %{customdata[1]}<br>"
+            "Deviation: %{x:+.2f}σ<extra></extra>"
+        ),
+    ))
+    fig.add_vline(x=0, line_color=BORDER, line_width=1)
+    fig.update_layout(
+        height=max(180, len(attr_df) * 34),
+        margin=dict(l=0, r=20, t=5, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(color=MUTED, gridcolor=BORDER, title="σ from peer median",
+                   zeroline=False, tickfont=dict(size=10)),
+        yaxis=dict(color=TEXT, gridcolor="rgba(0,0,0,0)",
+                   tickfont=dict(size=11), autorange="reversed"),
+        font=dict(color=MUTED, size=10), showlegend=False,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Companion detail table
+    rows_html = ""
+    for _, r in attr_df.iterrows():
+        z  = r["z_deviation"]
+        dc2 = "#ef4444" if z > 0 else "#22c55e"
+        dir_lbl = f"▲ +{z:.1f}σ above" if z > 0 else f"▼ {z:.1f}σ below"
+        fv = r["firm_value"]; pm = r["peer_median"]
+        imp_pct = r["importance"] * 100
+        rows_html += (
+            f'<tr style="border-bottom:1px solid {BORDER}">'
+            f'<td style="padding:5px 6px;color:{TEXT};font-size:11px">{r["display_name"]}</td>'
+            f'<td style="padding:5px 6px;text-align:right;color:{TEXT};font-size:11px">'
+            f'{"—" if pd.isna(fv) else f"{fv:.3g}"}</td>'
+            f'<td style="padding:5px 6px;text-align:right;color:{MUTED};font-size:11px">'
+            f'{"—" if pd.isna(pm) else f"{pm:.3g}"}</td>'
+            f'<td style="padding:5px 6px;text-align:right;font-size:11px;font-weight:700;color:{dc2}">'
+            f'{dir_lbl} peers</td>'
+            f'<td style="padding:5px 6px;text-align:right;color:{MUTED};font-size:10px">'
+            f'{imp_pct:.1f}%</td>'
+            f'</tr>'
+        )
+    st.markdown(
+        f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+        f'<thead><tr style="border-bottom:2px solid {BORDER}">'
+        f'<th style="text-align:left;padding:5px 6px;color:{MUTED}">Feature</th>'
+        f'<th style="text-align:right;padding:5px 6px;color:{MUTED}">Firm</th>'
+        f'<th style="text-align:right;padding:5px 6px;color:{MUTED}">Peer Median</th>'
+        f'<th style="text-align:right;padding:5px 6px;color:{MUTED}">vs Peers</th>'
+        f'<th style="text-align:right;padding:5px 6px;color:{MUTED}">Importance</th>'
+        f'</tr></thead><tbody>{rows_html}</tbody></table>',
+        unsafe_allow_html=True)
+    st.caption("Importance = share of XGBoost model's total feature weight (avg across 4 target models).")
+
 
 def page_relative_value():
     if RV_DATA is None:
@@ -2147,6 +2537,20 @@ def page_relative_value():
         f'</tr></thead><tbody>{rows_html}</tbody></table>',
         unsafe_allow_html=True)
 
+    # ── Feature attribution inspector ─────────────────────────────────────────
+    st.divider()
+    st.markdown(f'<div style="font-size:15px;font-weight:700;color:{TEXT};margin-bottom:8px">'
+                f'🔬 Firm Inspector — Feature Attribution</div>', unsafe_allow_html=True)
+
+    tickers_available = sorted(df["ticker"].dropna().unique().tolist())
+    inspect_ticker = st.selectbox(
+        "Select a firm to explain its valuation dislocation",
+        ["— choose a firm —"] + tickers_available,
+        key="rv_inspect_ticker")
+
+    if inspect_ticker and inspect_ticker != "— choose a firm —":
+        _rv_attribution_card(inspect_ticker)
+
     st.divider()
     st.caption("Model: XGBoost multi-output regressor trained on fundamentals + ecosystem peer context. "
                "Dislocation is the % gap between actual and model-implied multiples, normalised to a z-score. "
@@ -2209,8 +2613,10 @@ def _rv_entity_panel(ticker: str):
         f'<th style="text-align:right;padding:4px 6px;color:{MUTED};font-size:10px">GAP</th>'
         f'</tr></thead><tbody>{rows}</tbody></table>'
         f'<div style="font-size:10px;color:{MUTED};margin-top:8px">'
-        f'XGBoost · trained on 120 firms · {r.get("ecosystem","—")} peer group · refreshed daily</div>'
+        f'XGBoost · trained on 500 firms · {r.get("ecosystem","—")} peer group · refreshed daily</div>'
         f'</div>', unsafe_allow_html=True)
+
+    _rv_attribution_card(ticker)
 
 
 # ─── SIDEBAR (hidden — nav is via top bar) ───────────────────────────────────
@@ -2237,6 +2643,7 @@ def sidebar():
             ("home",      "📊", "Home"),
             ("portfolio", "🏦", "Counterparty"),
             ("rv",        "📐", "Relative Value"),
+            ("ecosystem", "🌐", "Ecosystems"),
             ("sources",   "📡", "Signal Feed"),
             ("agents",    "🤖", "AI Agents"),
         ]
@@ -2322,6 +2729,7 @@ def _top_nav():
     elif page == "network":            crumb_parts.append("Full Network")
     elif page == "sources":            crumb_parts.append("Signal Sources")
     elif page == "rv":                 crumb_parts.append("Relative Value")
+    elif page == "ecosystem":          crumb_parts.append("Ecosystems")
     elif page == "agents":             crumb_parts.append("AI Agents")
     elif page == "entity" and cp_name: crumb_parts += ["Counterparty", cp_name]
     elif page == "network":            crumb_parts.append("Counterparty")
@@ -2338,14 +2746,15 @@ def _top_nav():
 
     # Nav buttons + CP dropdown in one row
     NAV = [
-        ("🏠 Home",        "home",     "tnb_home"),
-        ("🏦 Counterparty","portfolio","tnb_port"),
-        ("📐 Rel. Value",  "rv",       "tnb_rv"),
-        ("📡 Sources",     "sources",  "tnb_src"),
-        ("🤖 Agents",      "agents",   "tnb_agents"),
+        ("🏠 Home",        "home",      "tnb_home"),
+        ("🏦 Counterparty","portfolio", "tnb_port"),
+        ("📐 Rel. Value",  "rv",        "tnb_rv"),
+        ("🌐 Ecosystems",  "ecosystem", "tnb_eco"),
+        ("📡 Sources",     "sources",   "tnb_src"),
+        ("🤖 Agents",      "agents",    "tnb_agents"),
     ]
-    btn_cols = st.columns([1, 1, 1, 1, 1, 2])
-    for col, (label, target, key) in zip(btn_cols[:5], NAV):
+    btn_cols = st.columns([1, 1, 1, 1, 1, 1, 2])
+    for col, (label, target, key) in zip(btn_cols[:6], NAV):
         active = (page == target) or (page == "entity" and target == "portfolio")
         with col:
             if active:
@@ -2359,7 +2768,7 @@ def _top_nav():
                     _navigate_to(target)
 
     # Sector + Country quick-filters (right side of nav)
-    with btn_cols[5]:
+    with btn_cols[6]:
         qf1, qf2 = st.columns(2)
         all_sectors = ["All sectors"] + sorted(set(e["sector"] for e in ENTITIES.values()))
         seen_c2: dict = {}
@@ -2424,6 +2833,7 @@ def main():
     elif page == "portfolio":        page_portfolio()
     elif page == "network":          page_full_network()
     elif page == "rv":               page_relative_value()
+    elif page == "ecosystem":        page_ecosystem()
     elif page == "sources":          page_sources()
     elif page == "agents":           page_agents()
     elif page == "entity" and cp and cp in ENTITIES: page_entity(cp)

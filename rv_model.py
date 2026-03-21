@@ -459,6 +459,112 @@ def get_dislocation_summary(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- #
+# 8. Feature attribution                                                        #
+# --------------------------------------------------------------------------- #
+FEATURE_DISPLAY_NAMES: dict[str, str] = {
+    "operatingMargins":         "Operating Margin",
+    "profitMargins":            "Net Profit Margin",
+    "returnOnEquity":           "Return on Equity",
+    "returnOnAssets":           "Return on Assets",
+    "revenueGrowth":            "Revenue Growth",
+    "earningsGrowth":           "Earnings Growth",
+    "debtToEquity":             "Debt / Equity",
+    "leverage_ratio":           "Leverage (Debt/EBITDA)",
+    "fcf_margin":               "FCF Margin",
+    "interest_cover_proxy":     "Interest Coverage",
+    "log_market_cap":           "Market Cap (log)",
+    "ev_revenue":               "EV / Revenue",
+    "grossMargins":             "Gross Margin",
+    "currentRatio":             "Current Ratio",
+    "ecosystem_median_pe":      "Peer Median P/E",
+    "ecosystem_median_evebita": "Peer Median EV/EBITDA",
+    "ecosystem_median_margin":  "Peer Median Margin",
+    "ecosystem_size":           "Ecosystem Size",
+}
+
+
+def feature_attribution(
+    ticker: str,
+    full_df: pd.DataFrame,
+    model,
+    top_n: int = 7,
+) -> pd.DataFrame:
+    """
+    Explain *why* a firm is RICH or CHEAP.
+
+    For each input feature the function computes:
+      - firm_value   : the firm's actual feature value
+      - peer_median  : median across ecosystem peers
+      - z_deviation  : (firm_value − peer_median) / peer_std
+      - importance   : XGBoost feature importance averaged across 4 sub-models
+      - score        : abs(z_deviation) × importance  (ranking signal)
+
+    Returns a DataFrame of the top_n rows sorted by score descending.
+    Columns: feature, display_name, firm_value, peer_median,
+             z_deviation, importance, score
+    """
+    df = add_ecosystem_features(full_df.copy())
+
+    mask = df["ticker"].str.upper() == ticker.upper()
+    if not mask.any():
+        logger.warning("feature_attribution: ticker %s not found", ticker)
+        return pd.DataFrame()
+
+    firm      = df[mask].iloc[0]
+    ecosystem = firm.get("ecosystem", "Unknown")
+    peer_df   = df[df["ecosystem"] == ecosystem] if ecosystem != "Unknown" else df
+
+    # Average feature importances across all sub-estimators
+    importances = np.zeros(len(FEATURE_COLS))
+    try:
+        for est in model.estimators_:
+            importances += est.feature_importances_
+        importances /= max(len(model.estimators_), 1)
+    except AttributeError:
+        importances = np.ones(len(FEATURE_COLS)) / len(FEATURE_COLS)
+
+    rows = []
+    for i, feat in enumerate(FEATURE_COLS):
+        if feat not in df.columns:
+            continue
+        firm_val = firm.get(feat, np.nan)
+        if pd.isna(firm_val):
+            continue
+
+        peer_vals   = pd.to_numeric(peer_df[feat], errors="coerce").dropna()
+        if len(peer_vals) < 2:
+            continue
+
+        peer_median = float(peer_vals.median())
+        peer_std    = float(peer_vals.std())
+        z_dev       = (float(firm_val) - peer_median) / peer_std if peer_std > 0 else 0.0
+        importance  = float(importances[i])
+        score       = abs(z_dev) * importance
+
+        rows.append({
+            "feature":      feat,
+            "display_name": FEATURE_DISPLAY_NAMES.get(feat, feat),
+            "firm_value":   float(firm_val),
+            "peer_median":  peer_median,
+            "z_deviation":  z_dev,
+            "importance":   importance,
+            "score":        score,
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    result = (
+        pd.DataFrame(rows)
+        .sort_values("score", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+    logger.info("feature_attribution(%s) — top %d drivers computed", ticker, len(result))
+    return result
+
+
+# --------------------------------------------------------------------------- #
 # CLI convenience                                                                #
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
